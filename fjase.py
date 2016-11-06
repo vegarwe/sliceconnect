@@ -6,7 +6,7 @@ import time
 #import binascii
 
 from pc_ble_driver_py.exceptions    import NordicSemiException, IllegalStateException
-from pc_ble_driver_py.ble_driver    import BLEDriverObserver, BLEUUIDBase, BLEUUID, BLEGapAddr, BLEGapConnParams, NordicSemiException
+from pc_ble_driver_py.ble_driver    import util, BLEDriverObserver, BLEUUIDBase, BLEUUID, BLEGapAddr, BLEGapConnParams, NordicSemiException
 from pc_ble_driver_py.ble_adapter   import BLEAdapter, BLEAdapterObserver, EvtSync
 
 from fjase_ble_driver import FjaseBLEDriver, FjaseBLEDriverObserver, BLEGapSecParams, BLEGapSecKeyset, BLEGapSecKeyDist
@@ -99,8 +99,8 @@ class FjaseAdapter(FjaseBLEDriverObserver, BLEDriverObserver, BLEAdapterObserver
                                  min_key_size   = 16,
                                  max_key_size   = 16,
                                  kdist_own      = BLEGapSecKeyDist(),
-                                 #kdist_peer     = BLEGapSecKeyDist(enc_key=True))
-                                 kdist_peer     = BLEGapSecKeyDist())
+                                 kdist_peer     = BLEGapSecKeyDist(enc_key=True))
+                                 #kdist_peer     = BLEGapSecKeyDist())
         self.adapter.driver.ble_gap_authenticate(self.conn_handle, sec_params)
         sec_event = self.event_q.get(timeout=32)
 
@@ -113,6 +113,22 @@ class FjaseAdapter(FjaseBLEDriverObserver, BLEDriverObserver, BLEAdapterObserver
             self.adapter.driver.ble_gap_auth_key_reply(self.conn_handle, key_type, map(ord, passkey))
         else:
             raise Exception("Unsupported auth key event")
+
+        evt, params = self.event_q.get(timeout=32)
+        evt, params = self.event_q.get(timeout=32)
+        print 'ediv', key_set.sec_keyset.keys_peer.p_enc_key.master_id.ediv
+        print 'rand', util.uint8_array_to_list(key_set.sec_keyset.keys_peer.p_enc_key.master_id.rand, 8)
+        print 'klen', key_set.sec_keyset.keys_peer.p_enc_key.enc_info.ltk_len
+        print 'ltk ', util.uint8_array_to_list(key_set.sec_keyset.keys_peer.p_enc_key.enc_info.ltk, 16)
+        print 'lesc', key_set.sec_keyset.keys_peer.p_enc_key.enc_info.lesc
+        print 'auth', key_set.sec_keyset.keys_peer.p_enc_key.enc_info.auth
+
+        return key_set
+
+    def encrypt(self, key_set):
+        self.adapter.driver.ble_gap_encrypt(self.conn_handle,
+                key_set.sec_keyset.keys_peer.p_enc_key.master_id,
+                key_set.sec_keyset.keys_peer.p_enc_key.enc_info)
 
     def enable_notifications(self):
         logger.debug('BLE: Enabling Notifications')
@@ -156,10 +172,12 @@ class FjaseAdapter(FjaseBLEDriverObserver, BLEDriverObserver, BLEAdapterObserver
 
     def on_gap_evt_conn_sec_update(self, ble_driver, conn_handle, sec_mode, sec_level, encr_key_size):
         logger.info('BLE_GAP_EVT_CONN_SEC_UPDATE')
+        self.event_q.put(('BLE_GAP_EVT_CONN_SEC_UPDATE', (conn_handle, sec_mode, sec_level, encr_key_size)))
 
     def on_gap_evt_auth_status(self, ble_driver, conn_handle, auth_status, error_src, bonded, sm1_levels, sm2_levels, kdist_own, kdist_peer):
         logger.info('BLE_GAP_EVT_AUTH_STATUS auth_status %r, error_src %r, bonded %r, sm1_levels %r, sm2_levels %r, kdist_own %r, kdist_peer %r',
                 auth_status, error_src, bonded, sm1_levels, sm2_levels, kdist_own, kdist_peer)
+        self.event_q.put(('BLE_GAP_EVT_AUTH_STATUS', (conn_handle, auth_status, error_src, bonded, sm1_levels, sm2_levels, kdist_own, kdist_peer)))
 
 
 
@@ -187,7 +205,14 @@ def main():
             #BLEGapAddr(BLEGapAddr.Types.random_static, [0xFE, 0xE4, 0x5D, 0xE9, 0x02, 0x19]))
             #BLEGapAddr(BLEGapAddr.Types.random_static, [0xEA, 0x81, 0xE3, 0xD0, 0x09, 0xC2]))
             #BLEGapAddr(BLEGapAddr.Types.random_static, [0xFB, 0x5E, 0xB7, 0xBD, 0xEC, 0x39]))
-    ble_backend.fjase_adapter.pair()
+    key_set = ble_backend.fjase_adapter.pair()
+
+    ble_backend.fjase_adapter.adapter.disconnect(ble_backend.fjase_adapter.conn_handle)
+    time.sleep(1)
+    ble_backend.fjase_adapter.connect(
+            BLEGapAddr(BLEGapAddr.Types.random_static, [0xD6, 0x60, 0xC4, 0xA9, 0x6B, 0x5F]))
+
+    ble_backend.fjase_adapter.encrypt(key_set)
     #ble_backend.fjase_adapter.service_discovery()
     ble_backend.fjase_adapter.read_attr(0x0003)
     ble_backend.close()

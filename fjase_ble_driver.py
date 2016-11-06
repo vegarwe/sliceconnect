@@ -105,7 +105,20 @@ class BLEGapSecParams(object):
 
 class BLEGapSecKeyset(object):
     def __init__(self, ):
-        pass #self.kdist_peer     = kdist_peer
+        self.sec_keyset                 = driver.ble_gap_sec_keyset_t()
+        keys_own                        = driver.ble_gap_sec_keys_t()
+        self.sec_keyset.keys_own        = keys_own
+
+        keys_peer                       = driver.ble_gap_sec_keys_t()
+        keys_peer.p_enc_key             = driver.ble_gap_enc_key_t()
+        keys_peer.p_enc_key.enc_info    = driver.ble_gap_enc_info_t()
+        keys_peer.p_enc_key.master_id   = driver.ble_gap_master_id_t()
+        keys_peer.p_id_key              = driver.ble_gap_id_key_t()
+        keys_peer.p_id_key.id_info      = driver.ble_gap_irk_t()
+        keys_peer.p_id_key.id_addr_info = driver.ble_gap_addr_t()
+        #keys_peer.p_sign_key            = driver.ble_gap_sign_info_t()
+        #keys_peer.p_pk                  = driver.ble_gap_lesc_p256_pk_t()
+        self.sec_keyset.keys_peer       = keys_peer
 
 
     @classmethod
@@ -113,21 +126,7 @@ class BLEGapSecKeyset(object):
         raise NotImplemented()
 
     def to_c(self):
-        sec_keyset              = driver.ble_gap_sec_keyset_t()
-        keys_own                = driver.ble_gap_sec_keys_t()
-        sec_keyset.keys_own     = keys_own
-
-        keys_peer               = driver.ble_gap_sec_keys_t()
-        peer_enc_key            = driver.ble_gap_enc_key_t()
-        peer_enc_key.enc_info   = driver.ble_gap_enc_info_t()
-        peer_enc_key.master_id  = driver.ble_gap_master_id_t()
-        keys_peer.p_enc_key     = peer_enc_key
-        #keys_peer.p_id_key      = driver.ble_gap_id_key_t()
-        #keys_peer.p_sign_key    = driver.ble_gap_sign_info_t()
-        #keys_peer.p_pk          = driver.ble_gap_lesc_p256_pk_t()
-        sec_keyset.keys_peer    = driver.ble_gap_sec_keys_t()
-
-        return sec_keyset
+        return self.sec_keyset
 
 
 class FjaseBLEDriverObserver(object):
@@ -189,6 +188,13 @@ class FjaseBLEDriver(BLEDriver):
         return driver.sd_ble_gap_auth_key_reply(self.rpc_adapter,
                 conn_handle, key_type, key_buf.cast())
 
+    @NordicSemiErrorCheck
+    @wrapt.synchronized(BLEDriver.api_lock)
+    def ble_gap_encrypt(self, conn_handle, master_id, enc_info):
+        #assert isinstance(sec_params, (BLEGapSecParams, NoneType)), 'Invalid argument type'
+        #assert isinstance(sec_keyset, BLEGapSecKeyset), 'Invalid argument type'
+        return driver.sd_ble_gap_encrypt(self.rpc_adapter, conn_handle, master_id, enc_info)
+
 
     @NordicSemiErrorCheck
     @wrapt.synchronized(BLEDriver.api_lock)
@@ -210,7 +216,7 @@ class FjaseBLEDriver(BLEDriver):
     @wrapt.synchronized(BLEDriver.observer_lock)
     def _sync_extended_evt_handler(self, adapter, ble_event):
         try:
-            #logger.info('ble_event %r', ble_event.header.evt_id)
+            logger.info('ble_event %r', ble_event.header.evt_id)
             if ble_event.header.evt_id == driver.BLE_GATTC_EVT_READ_RSP:
                 read_rsp = ble_event.evt.gattc_evt.params.read_rsp
                 data = util.uint8_array_to_list(read_rsp.data, read_rsp.len)
