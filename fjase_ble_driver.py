@@ -6,6 +6,32 @@ from pc_ble_driver_py.ble_driver import driver, util, BLEEvtID, BLEGattStatusCod
 
 logger = logging.getLogger('fjase')
 
+class BLEGapSecLevels(object):
+    def __init__(self, lv1, lv2, lv3, lv4):
+        self.lv1 = lv1
+        self.lv2 = lv2
+        self.lv3 = lv3
+        self.lv4 = lv4
+
+    @classmethod
+    def from_c(cls, sec_level):
+        return cls(lv1 = sec_level.lv1,
+                   lv2 = sec_level.lv2,
+                   lv3 = sec_level.lv3,
+                   lv4 = sec_level.lv4)
+
+    def to_c(self):
+        sec_level     = driver.ble_gap_sec_levels_t()
+        sec_level.lv1 = self.lv1
+        sec_level.lv2 = self.lv2
+        sec_level.lv3 = self.lv3
+        sec_level.lv4 = self.lv4
+        return sec_level
+
+    def __repr__(self):
+        return "%s(lv1=%r, lv2=%r, lv3=%r, lv4=%r)" % (self.__class__.__name__,
+                self.lv1, self.lv2, self.lv3, self.lv4)
+
 class BLEGapSecKeyDist(object):
     def __init__(self, enc_key=False, id_key=False, sign_key=False, link_key=False):
         self.enc_key    = enc_key
@@ -27,6 +53,10 @@ class BLEGapSecKeyDist(object):
         kdist.sign  = self.sign_key
         kdist.link  = self.link_key
         return kdist
+
+    def __repr__(self):
+        return "%s(enc_key=%r, id_key=%r, sign_key=%r, link_key=%r)" % (self.__class__.__name__,
+                self.enc_key, self.id_key, self.sign_key, self.link_key)
 
 class BLEGapSecParams(object):
     def __init__(self, bond, mitm, le_sec_pairing, keypress_noti, io_caps, oob, min_key_size, max_key_size, kdist_own, kdist_peer):
@@ -68,9 +98,12 @@ class BLEGapSecParams(object):
         sec_params.kdist_peer   = self.kdist_peer.to_c()
         return sec_params
 
-class BLEGapSecKeyset(object):
-    # sd_ble_gap_sec_params_reply(uint16_t conn_handle, uint8_t sec_status, ble_gap_sec_params_t const *p_sec_params, ble_gap_sec_keyset_t const *p_sec_keyset));
+    def __repr__(self):
+        return "%s(bond=%r, mitm=%r, le_sec_pairing=%r, keypress_noti=%r, io_caps=%r, oob=%r, min_key_size=%r, max_key_size=%r, kdist_own=%r, kdist_peer=%r)" % (
+                self.__class__.__name__, self.bond, self.mitm, self.le_sec_pairing, self.keypress_noti, self.io_caps,
+                self.oob, self.min_key_size, self.max_key_size, self.kdist_own, self.kdist_peer,)
 
+class BLEGapSecKeyset(object):
     def __init__(self, ):
         pass #self.kdist_peer     = kdist_peer
 
@@ -112,7 +145,7 @@ class FjaseBLEDriverObserver(object):
     def on_gap_evt_conn_sec_update(self, ble_driver, conn_handle, sec_mode, sec_level, encr_key_size):
         pass
 
-    def on_gap_evt_auth_status(self, ble_driver, conn_handle, auth_status, error_src, bonded):
+    def on_gap_evt_auth_status(self, ble_driver, conn_handle, auth_status, error_src, bonded, sm1_levels, sm2_levels, kdist_own, kdist_peer):
         pass
 
 class FjaseBLEDriver(BLEDriver):
@@ -226,7 +259,11 @@ class FjaseBLEDriver(BLEDriver):
                                                conn_handle          = ble_event.evt.gap_evt.conn_handle,
                                                auth_status          = auth_status.auth_status,
                                                error_src            = auth_status.error_src,
-                                               bonded               = auth_status.bonded
+                                               bonded               = auth_status.bonded,
+                                               sm1_levels           = BLEGapSecLevels.from_c(auth_status.sm1_levels),
+                                               sm2_levels           = BLEGapSecLevels.from_c(auth_status.sm2_levels),
+                                               kdist_own            = BLEGapSecKeyDist.from_c(auth_status.kdist_own),
+                                               kdist_peer           = BLEGapSecKeyDist.from_c(auth_status.kdist_peer)
                                                )
                 return True
         except Exception as e:

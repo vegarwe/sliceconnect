@@ -147,7 +147,7 @@ class FjaseAdapter(FjaseBLEDriverObserver, BLEDriverObserver, BLEAdapterObserver
         print "Hello", ble_driver, peer_addr.addr_type, peer_addr.addr, rssi, adv_type, adv_data
 
     def on_gap_evt_sec_params_request(self, ble_driver, conn_handle, sec_params):
-        logger.info('BLE_GAP_EVT_SEC_PARAMS_REQUEST')
+        logger.info('BLE_GAP_EVT_SEC_PARAMS_REQUEST %r', sec_params)
         self.event_q.put(('BLE_GAP_EVT_SEC_PARAMS_REQUEST', sec_params))
 
     def on_gap_evt_auth_key_request(self, ble_driver, conn_handle, key_type):
@@ -157,8 +157,9 @@ class FjaseAdapter(FjaseBLEDriverObserver, BLEDriverObserver, BLEAdapterObserver
     def on_gap_evt_conn_sec_update(self, ble_driver, conn_handle, sec_mode, sec_level, encr_key_size):
         logger.info('BLE_GAP_EVT_CONN_SEC_UPDATE')
 
-    def on_gap_evt_auth_status(self, ble_driver, conn_handle, auth_status, error_src, bonded):
-        logger.info('BLE_GAP_EVT_AUTH_STATUS')
+    def on_gap_evt_auth_status(self, ble_driver, conn_handle, auth_status, error_src, bonded, sm1_levels, sm2_levels, kdist_own, kdist_peer):
+        logger.info('BLE_GAP_EVT_AUTH_STATUS auth_status %r, error_src %r, bonded %r, sm1_levels %r, sm2_levels %r, kdist_own %r, kdist_peer %r',
+                auth_status, error_src, bonded, sm1_levels, sm2_levels, kdist_own, kdist_peer)
 
 
 
