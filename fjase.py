@@ -23,6 +23,83 @@ def logger_setup():
 
 logger = logger_setup()
 
+import json
+import os
+class Bond(object):
+    def __init__(self, peer_addr, own_addr, ediv, rand, ltk):
+        self.peer_addr  = peer_addr
+        self.own_addr   = own_addr
+        self.ediv       = ediv
+        self.rand       = rand
+        self.ltk        = ltk
+
+    @classmethod
+    def from_json(cls, bonds):
+        parsed = []
+        for addr_str, bond_dict in bonds.iteritems():
+            addr = BLEGapAddr.from_string(str(addr_str)) # TODO(vw): str(...) needed to handle unicode, but why???
+            parsed.append(cls(addr, bond_dict['Own'], bond_dict['Ediv'], bond_dict['Rand'], bond_dict['Ltk']))
+        return parsed
+
+
+class BondStorage(object):
+    DATA_STORE = os.path.join(os.path.expanduser('~'), 'bonds.json')
+
+    @classmethod
+    def _read_data_store(cls):
+        try:
+            with open(cls.DATA_STORE) as data_file:
+                return json.load(data_file)
+        except ValueError:
+            return {}
+        except IOError:
+            return {}
+
+    @classmethod
+    def store_bond(cls, own_addr, peer_addr, ediv, rand, ltk, lesc, auth):
+        #print 'own  %s' % own_addr
+        #print 'peer %s' % peer_addr
+        #print 'ediv %r' % ediv
+        #print 'rand %r' % rand
+        #print 'ltk  %r' % ltk
+        #print 'lesc %r' % lesc
+        #print 'auth %r' % auth
+
+        peer_addr_str   = str(peer_addr)
+        own_addr_str    = str(own_addr)
+
+        data_store = cls._read_data_store()
+        if data_store.has_key(peer_addr_str):
+            data_store[peer_addr_str]['Ediv'] = ediv
+            data_store[peer_addr_str]['Rand'] = rand
+            data_store[peer_addr_str]['Ltk' ] = ltk
+            data_store[peer_addr_str]['Own' ] = own_addr_str
+        else:
+            data_store[peer_addr_str] = {'Ediv': ediv,
+                                         'Rand': rand,
+                                         'Ltk' : ltk,
+                                         'Own' : own_addr_str}
+
+        with open(cls.DATA_STORE, 'w') as store:
+            json.dump(data_store, store)
+
+    def delete(self, addr_str):
+        data_store = self._read_data_store()
+        data_store.pop(addr_str, None)
+        with open(self.DATA_STORE, 'w') as store:
+            json.dump(data_store, store)
+
+    def get_bonds(self):
+        bonds = Bond.from_json(self._read_data_store())
+        return {str(bond.peer_addr): bond for bond in bonds}
+
+    def get_bond(self, addr):
+        addr_str = addr
+        for bond in Bond.from_json(self._read_data_store()):
+            if bond.peer_addr == addr:
+                return bond
+        return None
+
 class Fjase(object):
     def __init__(self, serial_port, baud_rate=115200):
         self.baud_rate          = baud_rate
@@ -53,6 +130,8 @@ class FjaseAdapter(FjaseBLEDriverObserver, BLEDriverObserver, BLEAdapterObserver
         super(FjaseAdapter, self).__init__()
         self.evt_sync           = EvtSync(['connected', 'disconnected'])
         self.conn_handle        = None
+        self.peer_addr          = None
+        self.own_addr           = None
         self.adapter            = adapter
         self.notifications_q    = Queue.Queue()
         self.event_q            = Queue.Queue()
@@ -75,6 +154,11 @@ class FjaseAdapter(FjaseBLEDriverObserver, BLEDriverObserver, BLEAdapterObserver
         self.conn_handle = self.evt_sync.wait('connected')
         if self.conn_handle is None:
             raise NordicSemiException('Timeout. Device not found.')
+        evt, params = self.event_q.get(timeout=.1)
+        if evt == 'BLE_GAP_EVT_CONNECTED':
+            # params contains (conn_handle, peer_addr, own_addr, role, conn_params)
+            self.peer_addr = params[1]
+            self.own_addr = params[2]
 
     def service_discovery(self):
         logger.debug('BLE: Service Discovery...')
@@ -116,19 +200,19 @@ class FjaseAdapter(FjaseBLEDriverObserver, BLEDriverObserver, BLEAdapterObserver
 
         evt, params = self.event_q.get(timeout=32)
         evt, params = self.event_q.get(timeout=32)
-        print 'ediv', key_set.sec_keyset.keys_peer.p_enc_key.master_id.ediv
-        print 'rand', util.uint8_array_to_list(key_set.sec_keyset.keys_peer.p_enc_key.master_id.rand, 8)
-        print 'klen', key_set.sec_keyset.keys_peer.p_enc_key.enc_info.ltk_len
-        print 'ltk ', util.uint8_array_to_list(key_set.sec_keyset.keys_peer.p_enc_key.enc_info.ltk, 16)
-        print 'lesc', key_set.sec_keyset.keys_peer.p_enc_key.enc_info.lesc
-        print 'auth', key_set.sec_keyset.keys_peer.p_enc_key.enc_info.auth
+        if evt == 'BLE_GAP_EVT_AUTH_STATUS':
+            BondStorage.store_bond(self.own_addr, self.peer_addr,
+                    key_set.sec_keyset.keys_peer.p_enc_key.master_id.ediv,
+                    util.uint8_array_to_list(key_set.sec_keyset.keys_peer.p_enc_key.master_id.rand, 8),
+                    util.uint8_array_to_list(key_set.sec_keyset.keys_peer.p_enc_key.enc_info.ltk,
+                            key_set.sec_keyset.keys_peer.p_enc_key.enc_info.ltk_len),
+                    key_set.sec_keyset.keys_peer.p_enc_key.enc_info.lesc,
+                    key_set.sec_keyset.keys_peer.p_enc_key.enc_info.auth)
 
         return key_set
 
-    def encrypt(self, key_set):
-        self.adapter.driver.ble_gap_encrypt(self.conn_handle,
-                key_set.sec_keyset.keys_peer.p_enc_key.master_id,
-                key_set.sec_keyset.keys_peer.p_enc_key.enc_info)
+    def encrypt(self, ediv, rand, ltk):
+        self.adapter.driver.ble_gap_encrypt(self.conn_handle, ediv, rand, ltk)
 
     def enable_notifications(self):
         logger.debug('BLE: Enabling Notifications')
@@ -150,9 +234,9 @@ class FjaseAdapter(FjaseBLEDriverObserver, BLEDriverObserver, BLEAdapterObserver
 
 
     def on_gap_evt_connected(self, ble_driver, conn_handle, peer_addr, own_addr, role, conn_params):
-        self.evt_sync.notify(evt = 'connected', data = conn_handle)
         logger.info('BLE: Connected to {}'.format(peer_addr))
-
+        self.evt_sync.notify(evt = 'connected', data = conn_handle)
+        self.event_q.put(('BLE_GAP_EVT_CONNECTED', (conn_handle, peer_addr, own_addr, role, conn_params)))
 
     def on_gap_evt_disconnected(self, ble_driver, conn_handle, reason):
         self.evt_sync.notify(evt = 'disconnected', data = conn_handle)
@@ -195,25 +279,25 @@ class FjaseAdapter(FjaseBLEDriverObserver, BLEDriverObserver, BLEAdapterObserver
                 conn_handle, status, error_handle, attr_handle, offset, ''.join(map(chr, data)))
 
 def main():
-    ble_backend = Fjase(serial_port="COM4")
+    ble_backend = Fjase(serial_port="COM17")
     ble_backend.open()
 
     #ble_backend.fjase_adapter.scan_start(timeout=.3)
 
-    ble_backend.fjase_adapter.connect(
-            BLEGapAddr(BLEGapAddr.Types.random_static, [0xD6, 0x60, 0xC4, 0xA9, 0x6B, 0x5F]))
-            #BLEGapAddr(BLEGapAddr.Types.random_static, [0xFE, 0xE4, 0x5D, 0xE9, 0x02, 0x19]))
-            #BLEGapAddr(BLEGapAddr.Types.random_static, [0xEA, 0x81, 0xE3, 0xD0, 0x09, 0xC2]))
-            #BLEGapAddr(BLEGapAddr.Types.random_static, [0xFB, 0x5E, 0xB7, 0xBD, 0xEC, 0x39]))
-    key_set = ble_backend.fjase_adapter.pair()
+    peer = BLEGapAddr.from_string("D6:60:C4:A9:6B:5F,r")
+    #peer = BLEGapAddr.from_string("FE:E4:5D:E9:02:19,r")
+    #peer = BLEGapAddr(BLEGapAddr.Types.random_static, [0xEA, 0x81, 0xE3, 0xD0, 0x09, 0xC2])
+    #peer = BLEGapAddr(BLEGapAddr.Types.random_static, [0xFB, 0x5E, 0xB7, 0xBD, 0xEC, 0x39])
+    ble_backend.fjase_adapter.connect(peer)
 
-    ble_backend.fjase_adapter.adapter.disconnect(ble_backend.fjase_adapter.conn_handle)
+    bond = BondStorage().get_bond(peer)
+    if bond:
+        ble_backend.fjase_adapter.encrypt(bond.ediv, bond.rand, bond.ltk)
+    else:
+        key_set = ble_backend.fjase_adapter.pair()
+
+    ble_backend.fjase_adapter.service_discovery()
     time.sleep(1)
-    ble_backend.fjase_adapter.connect(
-            BLEGapAddr(BLEGapAddr.Types.random_static, [0xD6, 0x60, 0xC4, 0xA9, 0x6B, 0x5F]))
-
-    ble_backend.fjase_adapter.encrypt(key_set)
-    #ble_backend.fjase_adapter.service_discovery()
     ble_backend.fjase_adapter.read_attr(0x0003)
     ble_backend.close()
 

@@ -6,6 +6,7 @@ from pc_ble_driver_py.ble_driver import driver, util, BLEEvtID, BLEGattStatusCod
 
 logger = logging.getLogger('fjase')
 
+
 class BLEGapSecLevels(object):
     def __init__(self, lv1, lv2, lv3, lv4):
         self.lv1 = lv1
@@ -104,7 +105,7 @@ class BLEGapSecParams(object):
                 self.oob, self.min_key_size, self.max_key_size, self.kdist_own, self.kdist_peer,)
 
 class BLEGapSecKeyset(object):
-    def __init__(self, ):
+    def __init__(self):
         self.sec_keyset                 = driver.ble_gap_sec_keyset_t()
         keys_own                        = driver.ble_gap_sec_keys_t()
         self.sec_keyset.keys_own        = keys_own
@@ -190,9 +191,18 @@ class FjaseBLEDriver(BLEDriver):
 
     @NordicSemiErrorCheck
     @wrapt.synchronized(BLEDriver.api_lock)
-    def ble_gap_encrypt(self, conn_handle, master_id, enc_info):
+    def ble_gap_encrypt(self, conn_handle, ediv, rand, ltk):
         #assert isinstance(sec_params, (BLEGapSecParams, NoneType)), 'Invalid argument type'
         #assert isinstance(sec_keyset, BLEGapSecKeyset), 'Invalid argument type'
+        print ediv, rand, ltk, len(rand), len(ltk)
+        master_id           = driver.ble_gap_master_id_t()
+        master_id.ediv      = ediv
+        master_id.rand      = util.list_to_uint8_array(rand).cast()
+        enc_info            = driver.ble_gap_enc_info_t()
+        enc_info.ltk_len    = len(ltk)
+        enc_info.ltk        = util.list_to_uint8_array(ltk).cast()
+        enc_info.lesc       = 0 # TODO: What?
+        enc_info.auth       = 1 # TODO: What?
         return driver.sd_ble_gap_encrypt(self.rpc_adapter, conn_handle, master_id, enc_info)
 
 
