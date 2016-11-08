@@ -191,18 +191,26 @@ class FjaseBLEDriver(BLEDriver):
 
     @NordicSemiErrorCheck
     @wrapt.synchronized(BLEDriver.api_lock)
-    def ble_gap_encrypt(self, conn_handle, ediv, rand, ltk):
+    def ble_gap_encrypt(self, conn_handle, ediv, rand, ltk, lesc, auth):
         #assert isinstance(sec_params, (BLEGapSecParams, NoneType)), 'Invalid argument type'
         #assert isinstance(sec_keyset, BLEGapSecKeyset), 'Invalid argument type'
-        print ediv, rand, ltk, len(rand), len(ltk)
+        #print 'ediv %r' % master_id.ediv
+        #print 'rand %r' % util.uint8_array_to_list(master_id.rand, 8)
+        #print 'ltk  %r' % util.uint8_array_to_list(enc_info.ltk, enc_info.ltk_len)
+        #print 'len  %r' % enc_info.ltk_len
+        #print 'lesc %r' % enc_info.lesc
+        #print 'auth %r' % enc_info.auth
+
+        rand_arr            = util.list_to_uint8_array(rand)
+        ltk_arr             = util.list_to_uint8_array(ltk)
         master_id           = driver.ble_gap_master_id_t()
         master_id.ediv      = ediv
-        master_id.rand      = util.list_to_uint8_array(rand).cast()
+        master_id.rand      = rand_arr.cast()
         enc_info            = driver.ble_gap_enc_info_t()
         enc_info.ltk_len    = len(ltk)
-        enc_info.ltk        = util.list_to_uint8_array(ltk).cast()
-        enc_info.lesc       = 0 # TODO: What?
-        enc_info.auth       = 1 # TODO: What?
+        enc_info.ltk        = ltk_arr.cast()
+        enc_info.lesc       = lesc
+        enc_info.auth       = auth
         return driver.sd_ble_gap_encrypt(self.rpc_adapter, conn_handle, master_id, enc_info)
 
 
@@ -249,9 +257,9 @@ class FjaseBLEDriver(BLEDriver):
             #elif ble_event.header.evt_id == driver.BLE_GAP_EVT_SEC_INFO_REQUEST:
             #    logger.info('BLE_GAP_EVT_SEC_INFO_REQUEST')
             #    return True
-            #elif ble_event.header.evt_id == driver.BLE_GAP_EVT_SEC_REQUEST:
-            #    logger.info('BLE_GAP_EVT_SEC_REQUEST')
-            #    return True
+            elif ble_event.header.evt_id == driver.BLE_GAP_EVT_SEC_REQUEST:
+                logger.info('BLE_GAP_EVT_SEC_REQUEST')
+                return True
             elif ble_event.header.evt_id == driver.BLE_GAP_EVT_AUTH_KEY_REQUEST:
                 auth_key_request = ble_event.evt.gap_evt.params.auth_key_request
                 for obs in self.extended_observers:
