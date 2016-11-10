@@ -3,6 +3,7 @@ import wrapt
 from types      import NoneType
 
 from pc_ble_driver_py.ble_driver import driver, util, BLEEvtID, BLEGattStatusCode, NordicSemiErrorCheck, BLEDriver, BLEDriverObserver
+from nrf_event import decode
 
 logger = logging.getLogger('fjase')
 
@@ -130,22 +131,8 @@ class BLEGapSecKeyset(object):
         return self.sec_keyset
 
 
-class FjaseBLEDriverObserver(object):
-    # TODO: These seems to belong on ble_adapter, not ble_driver
-    def on_gattc_evt_read_rsp(self, ble_driver, conn_handle, status, error_handle, attr_handle, offset, data):
-        # TODO: Does status and error_handle make sense for read_rsp
-        pass
-
-    def on_gap_evt_sec_params_request(self, ble_driver, conn_handle, sec_params):
-        pass
-
-    def on_gap_evt_auth_key_request(self, ble_driver, conn_handle, key_type):
-        pass
-
-    def on_gap_evt_conn_sec_update(self, ble_driver, conn_handle, sec_mode, sec_level, encr_key_size):
-        pass
-
-    def on_gap_evt_auth_status(self, ble_driver, conn_handle, auth_status, error_src, bonded, sm1_levels, sm2_levels, kdist_own, kdist_peer):
+class RawBLEDriverObserver(object):
+    def on_event(self, ble_driver, ble_event):
         pass
 
 class FjaseBLEDriver(BLEDriver):
@@ -227,74 +214,26 @@ class FjaseBLEDriver(BLEDriver):
             logfile.write('%s\n' % (log_message))
 
     def ble_evt_handler(self, adapter, ble_event):
-        if not self._sync_extended_evt_handler(adapter, ble_event):
-            #super(BLEDriver, self).sync_ble_evt_handler(adapter, ble_event)
-            BLEDriver.sync_ble_evt_handler(self, adapter, ble_event)
-
-    @wrapt.synchronized(BLEDriver.observer_lock)
-    def _sync_extended_evt_handler(self, adapter, ble_event):
         try:
-            logger.info('ble_event %r', ble_event.header.evt_id)
-            if ble_event.header.evt_id == driver.BLE_GATTC_EVT_READ_RSP:
-                read_rsp = ble_event.evt.gattc_evt.params.read_rsp
-                data = util.uint8_array_to_list(read_rsp.data, read_rsp.len)
-                for obs in self.extended_observers:
-                    obs.on_gattc_evt_read_rsp(ble_driver   = self,
-                                              conn_handle  = ble_event.evt.gattc_evt.conn_handle,
-                                              status       = BLEGattStatusCode(ble_event.evt.gattc_evt.gatt_status),
-                                              error_handle = ble_event.evt.gattc_evt.error_handle,
-                                              attr_handle  = read_rsp.handle,
-                                              offset       = read_rsp.offset,
-                                              data         = util.uint8_array_to_list(read_rsp.data, read_rsp.len))
-                return True
-            elif ble_event.header.evt_id == driver.BLE_GAP_EVT_SEC_PARAMS_REQUEST:
-                sec_params = ble_event.evt.gap_evt.params.sec_params_request.peer_params
-                for obs in self.extended_observers:
-                    obs.on_gap_evt_sec_params_request(ble_driver    = self,
-                                                      conn_handle   = ble_event.evt.gap_evt.conn_handle,
-                                                      sec_params    = BLEGapSecParams.from_c(sec_params))
-                return True
-            #elif ble_event.header.evt_id == driver.BLE_GAP_EVT_SEC_INFO_REQUEST:
-            #    logger.info('BLE_GAP_EVT_SEC_INFO_REQUEST')
-            #    return True
-            elif ble_event.header.evt_id == driver.BLE_GAP_EVT_SEC_REQUEST:
-                logger.info('BLE_GAP_EVT_SEC_REQUEST')
-                return True
-            elif ble_event.header.evt_id == driver.BLE_GAP_EVT_AUTH_KEY_REQUEST:
-                auth_key_request = ble_event.evt.gap_evt.params.auth_key_request
-                for obs in self.extended_observers:
-                    obs.on_gap_evt_auth_key_request(ble_driver  = self,
-                                                    conn_handle = ble_event.evt.gap_evt.conn_handle,
-                                                    key_type    = auth_key_request.key_type)
-                return True
-            elif ble_event.header.evt_id == driver.BLE_GAP_EVT_CONN_SEC_UPDATE:
-                conn_sec = ble_event.evt.gap_evt.params.conn_sec_update.conn_sec
-                for obs in self.extended_observers:
-                    obs.on_gap_evt_conn_sec_update(ble_driver       = self,
-                                                   conn_handle      = ble_event.evt.gap_evt.conn_handle,
-                                                   sec_mode         = conn_sec.sec_mode.sm,
-                                                   sec_level        = conn_sec.sec_mode.lv,
-                                                   encr_key_size    = conn_sec.encr_key_size)
-                return True
-            elif ble_event.header.evt_id == driver.BLE_GAP_EVT_AUTH_STATUS:
-                auth_status = ble_event.evt.gap_evt.params.auth_status
-                for obs in self.extended_observers:
-                    obs.on_gap_evt_auth_status(ble_driver           = self,
-                                               conn_handle          = ble_event.evt.gap_evt.conn_handle,
-                                               auth_status          = auth_status.auth_status,
-                                               error_src            = auth_status.error_src,
-                                               bonded               = auth_status.bonded,
-                                               sm1_levels           = BLEGapSecLevels.from_c(auth_status.sm1_levels),
-                                               sm2_levels           = BLEGapSecLevels.from_c(auth_status.sm2_levels),
-                                               kdist_own            = BLEGapSecKeyDist.from_c(auth_status.kdist_own),
-                                               kdist_peer           = BLEGapSecKeyDist.from_c(auth_status.kdist_peer)
-                                               )
-                return True
+            self._sync_extended_evt_handler(adapter, ble_event)
         except Exception as e:
             logger.error("Exception: {}".format(str(e)))
             for line in traceback.extract_tb(sys.exc_info()[2]):
                 logger.error(line)
             logger.error("")
+        #super(BLEDriver, self).sync_ble_evt_handler(adapter, ble_event)
+        BLEDriver.sync_ble_evt_handler(self, adapter, ble_event)
 
-        return False
+    @wrapt.synchronized(BLEDriver.observer_lock)
+    def _sync_extended_evt_handler(self, adapter, ble_event):
+        logger.info('ble_event %r', ble_event.header.evt_id)
 
+        if len(self.extended_observers) == 0:
+            return
+
+        ble_event = decode(ble_event)
+        if ble_event is None:
+            return
+
+        for obs in self.extended_observers:
+            obs.on_event(self, ble_event)

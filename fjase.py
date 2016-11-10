@@ -11,7 +11,9 @@ from pc_ble_driver_py.ble_driver    import driver, util, BLEDriverObserver, Nord
 from pc_ble_driver_py.ble_driver    import BLEGapAddr, BLEGapConnParams, BLEGattcWriteParams, BLEGattWriteOperation, BLEGattExecWriteFlag, NordicSemiException
 
 import bond_store
-from fjase_ble_driver import FjaseBLEDriver, FjaseBLEDriverObserver, BLEGapSecParams, BLEGapSecKeyset, BLEGapSecKeyDist
+import nrf_event
+from nrf_event import EventSync
+from fjase_ble_driver import FjaseBLEDriver, RawBLEDriverObserver, BLEGapSecParams, BLEGapSecKeyset, BLEGapSecKeyDist
 
 
 def logger_setup():
@@ -47,41 +49,54 @@ class Fjase(object):
     config_cp   = 0x003a
 
     def __init__(self, serial_port, baud_rate=115200):
-        self.baud_rate          = baud_rate
-        self.serial_port        = serial_port
-        self.fjase_adapter      = None
+        self.baud_rate      = baud_rate
+        self.serial_port    = serial_port
+        self.adapter        = None
 
     def open(self):
         logger.debug("Connecting to adapter")
-        if self.fjase_adapter:
+        if self.adapter:
             raise IllegalStateException('DFU Adapter is already open')
 
         driver           = FjaseBLEDriver(serial_port    = self.serial_port,
                                      baud_rate      = self.baud_rate)
-        self.fjase_adapter = FjaseAdapter(driver)
-        self.fjase_adapter.open()
+        self.adapter = FjaseAdapter(driver)
+        self.adapter.open()
 
     def close(self):
         logger.debug("Disconnecting adapter")
-        if not self.fjase_adapter:
+        if not self.adapter:
             raise IllegalStateException('DFU Adapter is already closed')
-        self.fjase_adapter.close()
-        self.fjase_adapter = None
+        self.adapter.close()
+        self.adapter = None
+
+    def read_attr(self, attr_handle):
+        with EventSync(self.adapter.driver, [nrf_event.GattcEvtReadResponse]) as evt_sync:
+            self.adapter.driver.read(self.adapter.conn_handle, 0x0003)
+            print evt_sync.get()
 
     def dfu_goto_state(self):
-        self.fjase_adapter.write_attr(self.sync_cp + 1,     [1, 0])
-        self.fjase_adapter.write_attr(self.dfu_cp, [1])
+        self.adapter.write_attr(self.dfu_cp + 1,     [1, 0])
+        time.sleep(.1)
+        self.adapter.write_attr(self.dfu_cp, [1])
+
+    def version_get(self):
+        self.adapter.write_attr(self.config_cp, [0x01, 0xFD])
+        time.sleep(1)
 
     def enable_services(self):
-        self.fjase_adapter.write_attr(self.sync_cp   + 1,   [1, 0])
-        self.fjase_adapter.write_attr(self.sync_data + 1,   [1, 0])
-        self.fjase_adapter.write_attr(self.config_cp + 1,   [1, 0])
+        self.adapter.write_attr(self.sync_cp   + 1,   [1, 0])
+        time.sleep(.1)
+        self.adapter.write_attr(self.sync_data + 1,   [1, 0])
+        time.sleep(.1)
+        self.adapter.write_attr(self.config_cp + 1,   [1, 0])
+        time.sleep(.1)
 
     def streaming_enable(self):
-        self.fjase_adapter.write_attr(self.stream_cp + 1,   [1, 0])
+        self.adapter.write_attr(self.stream_cp + 1,   [1, 0])
 
     def config_wrist_action(self, on=True):
-        self.fjase_adapter.write_attr(self.config_cp, [0x11, 0x00, 1 if on else 0])
+        self.adapter.write_attr(self.config_cp, [0x11, 0x00, 1 if on else 0])
 
     def config_afe_current(self, current=25, led_mode=0):
         pass
@@ -98,7 +113,8 @@ class Fjase(object):
             brightness = 7
         if brightness > 100:
             brightness = 100
-        self.fjase_adapter.write_attr(self.config_cp, [0x10, 0x00, brightness])
+        self.adapter.write_attr(self.config_cp, [0x10, 0x00, brightness])
+        time.sleep(.1)
 
     def time(self, timestamp=None):
         config_cmd = [0x01, 0xF0]
@@ -106,7 +122,7 @@ class Fjase(object):
             config_cmd.extend(_get_time(timestamp))
             print 'setting time', datetime.fromtimestamp(timestamp), timestamp
 
-        self.fjase_adapter.write_attr(0x003a, config_cmd)
+        self.adapter.write_attr(0x003a, config_cmd)
         #with Blipp(self.hcidev, Att.AttHandleValueNotification) as blipp:
         #    self.le_device.gattc.write(self.config_cp, config_cmd)
         #    retval = blipp.Wait(1)
@@ -117,7 +133,7 @@ class Fjase(object):
         #        print 'current_time', datetime.utcfromtimestamp(timestamp), timestamp
 
 
-class FjaseAdapter(FjaseBLEDriverObserver, BLEDriverObserver):
+class FjaseAdapter(RawBLEDriverObserver, BLEDriverObserver):
 
     def __init__(self, driver):
         super(FjaseAdapter, self).__init__()
@@ -159,9 +175,6 @@ class FjaseAdapter(FjaseBLEDriverObserver, BLEDriverObserver):
         #self.adapter.service_discovery(conn_handle=self.conn_handle)
         logger.debug('BLE: Service Discovery done')
 
-
-    def read_attr(self, attr_handle):
-        self.driver.read(self.conn_handle, 0x0003)
 
     def write_attr(self, attr_handle, value, offset=0):
         write_params = BLEGattcWriteParams(BLEGattWriteOperation.write_req,
@@ -210,7 +223,15 @@ class FjaseAdapter(FjaseBLEDriverObserver, BLEDriverObserver):
         return key_set
 
     def encrypt(self, bond):
-        self.driver.ble_gap_encrypt(self.conn_handle, bond.ediv, bond.rand, bond.ltk, bond.lesc, bond.auth)
+        with EventSync(self.driver, [nrf_event.GapSecEvt, nrf_event.GapEvtDisconnected]) as evt_sync:
+            self.driver.ble_gap_encrypt(self.conn_handle, bond.ediv, bond.rand, bond.ltk, bond.lesc, bond.auth)
+            evt =  evt_sync.get(timeout=32)
+            if   isinstance(evt,  nrf_event.GapSecEvtConnSecUpdate):
+                if evt.sec_mode == 1 and evt.sec_level == 1:
+                    logger.info("Enc failed, deleting bond")
+                    bond_store.delete(str(bond.peer_addr))
+            elif isinstance(evt, nrf_event.GapEvtDisconnected):
+                raise NordicSemiException('encryption failed.')
 
     def enable_notifications(self):
         logger.debug('BLE: Enabling Notifications')
@@ -230,6 +251,8 @@ class FjaseAdapter(FjaseBLEDriverObserver, BLEDriverObserver):
             evt, params = self.event_q.get(timeout=1)
         self.driver.close()
 
+    def on_event(self, ble_driver, ble_event):
+        logger.info('high level ble_event %r', ble_event)
 
     def on_gap_evt_connected(self, ble_driver, conn_handle, peer_addr, own_addr, role, conn_params):
         logger.info('BLE: Connected to {}'.format(peer_addr))
@@ -261,22 +284,15 @@ class FjaseAdapter(FjaseBLEDriverObserver, BLEDriverObserver):
         self.event_q.put(('BLE_GAP_EVT_AUTH_STATUS', (conn_handle, auth_status, error_src, bonded, sm1_levels, sm2_levels, kdist_own, kdist_peer)))
 
 
-    #def on_notification(self, ble_adapter, conn_handle, uuid, data):
-    #    if self.conn_handle         != conn_handle: return
-    #    print uuid, data
-    #    #if DFUAdapter.CP_UUID.value != uuid.value:  return
-    #    logger.debug(data)
-    #    self.notifications_q.put(data)
 
 
+    def on_gattc_evt_hvx(self, ble_driver, conn_handle, status, error_handle, attr_handle, hvx_type, data):
+        logger.info("Got notification status %s err_handle %s attr_handle %s hvx_type %s data: %r",
+                status, error_handle, attr_handle, hvx_type, ''.join(map(chr, data)))
 
     def on_gattc_evt_write_rsp(self, ble_driver, conn_handle, status, error_handle, attr_handle, write_op, offset, data):
-        logger.info("Got write response conn_handle %s status %s err_handle %s attr_handle %s write_op %s offset %s data: %r",
-                conn_handle, status, error_handle, attr_handle, write_op, offset, ''.join(map(chr, data)))
-
-    def on_gattc_evt_read_rsp(self, ble_driver, conn_handle, status, error_handle, attr_handle, offset, data):
-        logger.info("Got read response conn_handle %s status %s err_handle %s attr_handle %s offset %s data: %r",
-                conn_handle, status, error_handle, attr_handle, offset, ''.join(map(chr, data)))
+        logger.info("Got write response status %s err_handle %s attr_handle %s write_op %s offset %s data: %r",
+                status, error_handle, attr_handle, write_op, offset, ''.join(map(chr, data)))
 
 ADDR_SHIELD = "FB:5E:B7:BD:EC:39,r"
 ADDR_BUILD  = 'DE:31:CD:FB:0B:57,r'
@@ -288,27 +304,29 @@ def main(args):
     #ble_backend = Fjase(serial_port="COM17")
     ble_backend = Fjase(serial_port=args.device)
     ble_backend.open()
-    #ble_backend.fjase_adapter.scan_start(timeout=.3)
+    #ble_backend.adapter.scan_start(timeout=.3)
 
-    peer = BLEGapAddr.from_string(ADDR_SHIELD)
-    ble_backend.fjase_adapter.connect(peer)
+    peer = BLEGapAddr.from_string(ADDR_BUILD)
+    ble_backend.adapter.connect(peer)
 
-    bond = bond_store.get_bond(peer)
-    if bond:
-        ble_backend.fjase_adapter.encrypt(bond)
-    else:
-        key_set = ble_backend.fjase_adapter.pair()
-        ble_backend.enable_services()
-    time.sleep(1)
+    #bond = bond_store.get_bond(peer)
+    #if bond:
+    #    ble_backend.adapter.encrypt(bond)
+    #else:
+    #    key_set = ble_backend.adapter.pair()
+    #    ble_backend.enable_services()
+    #time.sleep(1)
 
-    #ble_backend.fjase_adapter.service_discovery()
+    #ble_backend.adapter.service_discovery()
+    #time.sleep(1)
+    #ble_backend.time((datetime.now() - datetime.utcfromtimestamp(0)).total_seconds())
+    #time.sleep(1)
+    ble_backend.read_attr(0x0003)
     time.sleep(1)
-    ble_backend.time((datetime.now() - datetime.utcfromtimestamp(0)).total_seconds())
-    time.sleep(1)
-    ble_backend.fjase_adapter.read_attr(0x0003)
-    time.sleep(1)
-    ble_backend.config_display_brightness(20)
-    time.sleep(1)
+    #ble_backend.config_display_brightness(20)
+    #ble_backend.version_get()
+
+    #ble_backend.dfu_goto_state()
     ble_backend.close()
 
 if __name__ == '__main__':
