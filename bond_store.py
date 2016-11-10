@@ -64,7 +64,7 @@ def store_bond(own_addr, peer_addr, ediv, rand, ltk, lesc, auth):
                                      'auth': auth,
                                      'own' : own_addr_str}
 
-    with open(cls.DATA_STORE, 'w') as store:
+    with open(DATA_STORE, 'w') as store:
         json.dump(data_store, store)
 
 def delete(addr_str):
