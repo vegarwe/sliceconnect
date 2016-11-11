@@ -11,9 +11,8 @@ from pc_ble_driver_py.ble_driver    import driver, util, BLEDriverObserver, Nord
 from pc_ble_driver_py.ble_driver    import BLEGapAddr, BLEGapConnParams, BLEGattcWriteParams, BLEGattWriteOperation, BLEGattExecWriteFlag, NordicSemiException
 
 import bond_store
-import nrf_event
-from nrf_event import EventSync
-from fjase_ble_driver import FjaseBLEDriver, RawBLEDriverObserver, BLEGapSecParams, BLEGapSecKeyset, BLEGapSecKeyDist
+from nrf_event import *
+from fjase_ble_driver import FjaseBLEDriver, RawBLEDriverObserver
 
 
 def logger_setup():
@@ -71,7 +70,7 @@ class Fjase(object):
         self.adapter = None
 
     def read_attr(self, attr_handle):
-        with EventSync(self.adapter.driver, [nrf_event.GattcEvtReadResponse]) as evt_sync:
+        with EventSync(self.adapter.driver, [GattcEvtReadResponse]) as evt_sync:
             self.adapter.driver.read(self.adapter.conn_handle, 0x0003)
             print evt_sync.get()
 
@@ -185,33 +184,40 @@ class FjaseAdapter(RawBLEDriverObserver, BLEDriverObserver):
         self.driver.ble_gattc_write(self.conn_handle, write_params)
 
     def pair(self):
-        sec_params = BLEGapSecParams(bond           = True,
-                                     mitm           = True,
-                                     le_sec_pairing = False,
-                                     keypress_noti  = False,
-                                     io_caps        = 4, # KeyboardDisplay
-                                     oob            = False,
-                                     min_key_size   = 16,
-                                     max_key_size   = 16,
-                                     kdist_own      = BLEGapSecKeyDist(),
-                                     kdist_peer     = BLEGapSecKeyDist(enc_key=True))
-                                     #kdist_peer     = BLEGapSecKeyDist())
-        self.driver.ble_gap_authenticate(self.conn_handle, sec_params)
-        sec_event = self.event_q.get(timeout=32)
+        with EventSync(self.driver, [GapEvtSec]) as evt_sync:
+            sec_params = BLEGapSecParams(bond           = True,
+                                         mitm           = True,
+                                         le_sec_pairing = False,
+                                         keypress_noti  = False,
+                                         io_caps        = 4, # KeyboardDisplay
+                                         oob            = False,
+                                         min_key_size   = 16,
+                                         max_key_size   = 16,
+                                         kdist_own      = BLEGapSecKeyDist(),
+                                         kdist_peer     = BLEGapSecKeyDist(enc_key=True))
+                                         #kdist_peer     = BLEGapSecKeyDist())
+            self.driver.ble_gap_authenticate(self.conn_handle, sec_params)
 
-        key_set = BLEGapSecKeyset()
-        self.driver.ble_gap_sec_params_reply(self.conn_handle, 0, None, key_set)
+            event = evt_sync.get(GapEvtSecParamsRequest, timeout=32)
+            if not event:
+                raise NordicSemiException('Did not get GapEvtSecParamsRequest in time.')
+            key_set = BLEGapSecKeyset()
+            self.driver.ble_gap_sec_params_reply(self.conn_handle, 0, None, key_set)
 
-        evt, key_type = self.event_q.get(timeout=32)
-        if key_type == 0x01:
-            passkey = raw_input("pass key: ")
-            self.driver.ble_gap_auth_key_reply(self.conn_handle, key_type, map(ord, passkey))
-        else:
-            raise Exception("Unsupported auth key event")
+            event = evt_sync.get(GapEvtAuthKeyRequest, timeout=32)
+            if event.key_type == GapAuthKeyType.BLE_GAP_AUTH_KEY_TYPE_PASSKEY:
+                passkey = raw_input("pass key: ")
+                self.driver.ble_gap_auth_key_reply(self.conn_handle, event.key_type, map(ord, passkey))
+            else:
+                raise Exception("Unsupported auth key event")
 
-        evt, params = self.event_q.get(timeout=32)
-        evt, params = self.event_q.get(timeout=32)
-        if evt == 'BLE_GAP_EVT_AUTH_STATUS':
+            event = evt_sync.get(GapEvtConnSecUpdate, timeout=32)
+            print event
+            event = evt_sync.get(GapEvtAuthStatus, timeout=32)
+            print event
+            if not event:
+                raise NordicSemiException('Did not get GapEvtAuthStatus in time.')
+
             bond_store.store_bond(self.own_addr, self.peer_addr,
                     key_set.sec_keyset.keys_peer.p_enc_key.master_id.ediv,
                     util.uint8_array_to_list(key_set.sec_keyset.keys_peer.p_enc_key.master_id.rand, 8),
@@ -220,17 +226,17 @@ class FjaseAdapter(RawBLEDriverObserver, BLEDriverObserver):
                     key_set.sec_keyset.keys_peer.p_enc_key.enc_info.lesc,
                     key_set.sec_keyset.keys_peer.p_enc_key.enc_info.auth)
 
-        return key_set
+            return key_set
 
     def encrypt(self, bond):
-        with EventSync(self.driver, [nrf_event.GapSecEvt, nrf_event.GapEvtDisconnected]) as evt_sync:
+        with EventSync(self.driver, [GapEvtSec, GapEvtDisconnected]) as evt_sync:
             self.driver.ble_gap_encrypt(self.conn_handle, bond.ediv, bond.rand, bond.ltk, bond.lesc, bond.auth)
-            evt =  evt_sync.get(timeout=32)
-            if   isinstance(evt,  nrf_event.GapSecEvtConnSecUpdate):
-                if evt.sec_mode == 1 and evt.sec_level == 1:
+            event =  evt_sync.get(timeout=32)
+            if   isinstance(event, GapEvtConnSecUpdate):
+                if event.sec_mode == 1 and event.sec_level == 1:
                     logger.info("Enc failed, deleting bond")
                     bond_store.delete(str(bond.peer_addr))
-            elif isinstance(evt, nrf_event.GapEvtDisconnected):
+            elif isinstance(event, GapEvtDisconnected):
                 raise NordicSemiException('encryption failed.')
 
     def enable_notifications(self):
@@ -251,8 +257,8 @@ class FjaseAdapter(RawBLEDriverObserver, BLEDriverObserver):
             evt, params = self.event_q.get(timeout=1)
         self.driver.close()
 
-    def on_event(self, ble_driver, ble_event):
-        logger.info('high level ble_event %r', ble_event)
+    def on_event(self, ble_driver, event):
+        logger.info('high level event %r', event)
 
     def on_gap_evt_connected(self, ble_driver, conn_handle, peer_addr, own_addr, role, conn_params):
         logger.info('BLE: Connected to {}'.format(peer_addr))
@@ -309,13 +315,13 @@ def main(args):
     peer = BLEGapAddr.from_string(ADDR_BUILD)
     ble_backend.adapter.connect(peer)
 
-    #bond = bond_store.get_bond(peer)
-    #if bond:
-    #    ble_backend.adapter.encrypt(bond)
-    #else:
-    #    key_set = ble_backend.adapter.pair()
-    #    ble_backend.enable_services()
-    #time.sleep(1)
+    bond = bond_store.get_bond(peer)
+    if bond:
+        ble_backend.adapter.encrypt(bond)
+    else:
+        key_set = ble_backend.adapter.pair()
+        ble_backend.enable_services()
+    time.sleep(1)
 
     #ble_backend.adapter.service_discovery()
     #time.sleep(1)
