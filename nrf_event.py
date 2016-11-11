@@ -136,9 +136,9 @@ class BLEGapSecKeyset(object):
 
 
 class EventSync(BLEDriverObserver):
-    def __init__(self, driver, event_filter=None):
+    def __init__(self, adapter, event_filter=None):
         super(BLEDriverObserver, self).__init__()
-        self._driver        = driver
+        self._driver        = adapter.driver
         if isinstance(event_filter, (list, tuple)):
             self._events = event_filter
         elif classes == None:
@@ -160,7 +160,11 @@ class EventSync(BLEDriverObserver):
             return
         self._queue.put(event)
 
-    def get(self, event_type=None, block=True, timeout=None):
+    def get(self, block=True, timeout=None):
+        return self._queue.get(block, timeout)
+
+    # TODO: Needs more testing!!!!
+    def get_specific(self, event_type=None, block=True, timeout=None):
         start_time = time.time()
         while True:
             try:
@@ -242,10 +246,17 @@ class GapEvtSecParamsRequest(GapEvtSec):
     def __repr__(self):
         return "%s(conn_handle=%r, sec_params=%r)" % ( self.__class__.__name__, self.conn_handle, self.sec_params)
 
+class GapIoCaps(IntEnum):
+    DISPLAY_ONLY        = driver.BLE_GAP_IO_CAPS_DISPLAY_ONLY
+    DISPLAY_YESNO       = driver.BLE_GAP_IO_CAPS_DISPLAY_YESNO
+    KEYBOARD_ONLY       = driver.BLE_GAP_IO_CAPS_KEYBOARD_ONLY
+    NONE                = driver.BLE_GAP_IO_CAPS_NONE
+    KEYBOARD_DISPLAY    = driver.BLE_GAP_IO_CAPS_KEYBOARD_DISPLAY
+
 class GapAuthKeyType(IntEnum):
-    BLE_GAP_AUTH_KEY_TYPE_NONE      = driver.BLE_GAP_AUTH_KEY_TYPE_NONE
-    BLE_GAP_AUTH_KEY_TYPE_PASSKEY   = driver.BLE_GAP_AUTH_KEY_TYPE_PASSKEY
-    BLE_GAP_AUTH_KEY_TYPE_OOB       = driver.BLE_GAP_AUTH_KEY_TYPE_OOB
+    NONE    = driver.BLE_GAP_AUTH_KEY_TYPE_NONE
+    PASSKEY = driver.BLE_GAP_AUTH_KEY_TYPE_PASSKEY
+    OOB     = driver.BLE_GAP_AUTH_KEY_TYPE_OOB
 
 class GapEvtAuthKeyRequest(GapEvtSec):
     evt_id = driver.BLE_GAP_EVT_AUTH_KEY_REQUEST

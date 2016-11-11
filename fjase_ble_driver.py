@@ -80,7 +80,7 @@ class FjaseBLEDriver(BLEDriver):
 
     @NordicSemiErrorCheck
     @wrapt.synchronized(BLEDriver.api_lock)
-    def read(self, conn_handle, read_handle, offset=0):
+    def ble_gattc_read(self, conn_handle, read_handle, offset=0):
         return driver.sd_ble_gattc_read(self.rpc_adapter, conn_handle, read_handle, offset)
 
 
