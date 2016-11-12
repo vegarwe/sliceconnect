@@ -26,36 +26,15 @@ class FjaseAdapter(RawBLEDriverObserver):
         self.ble_gattc_write            = self.driver.ble_gattc_write
 
 
-    def open(self):
-        self.driver.open()
-        self.driver.ble_enable()
-
     @classmethod
     def open_serial(cls, serial_port, baud_rate):
         adapter = cls(FjaseBLEDriver(serial_port=serial_port, baud_rate=baud_rate))
         adapter.open()
         return adapter
 
-    def gap_authenticate(self, conn_handle, bond=True, mitm=True, le_sec_pairing=False, keypress_noti=False, io_caps=None,
-                         oob=False, min_key_size=16, max_key_size=16, kdist_own=None, kdist_peer=None):
-        # TODO Create BLEGapSecKeyDist static values with defaults
-        if not io_caps:
-            io_caps = GapIoCaps.None
-        if not kdist_own:
-            kdist_own = BLEGapSecKeyDist()
-        if not kdist_peer:
-            kdist_peer = BLEGapSecKeyDist(enc_key=True)
-        sec_params = BLEGapSecParams(bond           = bond,
-                                     mitm           = mitm,
-                                     le_sec_pairing = le_sec_pairing,
-                                     keypress_noti  = keypress_noti,
-                                     io_caps        = io_caps,
-                                     oob            = oob,
-                                     min_key_size   = min_key_size,
-                                     max_key_size   = max_key_size,
-                                     kdist_own      = kdist_own,
-                                     kdist_peer     = kdist_peer)
-        self.driver.ble_gap_authenticate(conn_handle, sec_params)
+    def open(self):
+        self.driver.open()
+        self.driver.ble_enable()
 
     def close(self):
         with EventSync(self, [GapEvtDisconnected]) as evt_sync:
@@ -66,7 +45,6 @@ class FjaseAdapter(RawBLEDriverObserver):
         self.driver.close()
 
     def on_event(self, ble_driver, event):
-        logger.info('high level event %r', event)
         if   isinstance(event, GapEvtConnected):
             self.conn_handles.append(event.conn_handle)
         elif isinstance(event, GapEvtDisconnected):
@@ -74,3 +52,5 @@ class FjaseAdapter(RawBLEDriverObserver):
                 self.conn_handles.remove(event.conn_handle)
             except ValueError:
                 pass
+        elif isinstance(event, GapEvtAdvReport):
+            pass # TODO: Maintain list of seen devices

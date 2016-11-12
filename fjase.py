@@ -8,6 +8,7 @@ from pc_ble_driver_py.ble_driver    import BLEGapAddr, BLEGapConnParams
 
 import bond_store
 from nrf_event          import *
+from nrf_serial_no      import nrf_sd_fwid
 from fjase_ble_driver   import RawBLEDriverObserver
 from fjase_ble_adapter  import FjaseAdapter
 from ble_gattc          import GattClient
@@ -80,7 +81,7 @@ class Fjase(object):
 
     def _pair(self):
         with EventSync(self.adapter, [GapEvtSec]) as evt_sync:
-            self.adapter.gap_authenticate(self.conn_handle, io_caps = GapIoCaps.KEYBOARD_DISPLAY)
+            self.gattc.gap_authenticate(io_caps = GapIoCaps.KEYBOARD_DISPLAY)
 
             event = evt_sync.get(timeout=32)
             if not isinstance(event, GapEvtSecParamsRequest):
@@ -135,9 +136,7 @@ class Fjase(object):
         time.sleep(1)
 
     def read_name(self):
-        with EventSync(self.adapter, [GattcEvtReadResponse]) as evt_sync:
-            self.adapter.ble_gattc_read(self.conn_handle, 0x0003)
-            return evt_sync.get()
+        return self.gattc.read(0x0003)
 
     def dfu_goto_state(self):
         self.gattc.write(self.dfu_cp + 1,     [1, 0])
@@ -145,9 +144,44 @@ class Fjase(object):
         self.gattc.write(self.dfu_cp, [1])
 
     def version_get(self):
-        self.gattc.write(self.config_cp, [0x01, 0xFD])
-        time.sleep(1)
-        print "Get notification"
+        with EventSync(self.adapter, [GattcEvtWriteResponse, GattcEvtHvx]) as evt_sync:
+            self.gattc.write(self.config_cp, [0x01, 0xFD])
+
+    def _config_write(self, cmd):
+        with EventSync(self.adapter, [GattcEvtWriteResponse, GattcEvtHvx]) as evt_sync:
+            self.gattc.write(self.config_cp, cmd)
+
+            for _ in range(5): # Arbitrarly chosen a number to not loop for ever
+                event = evt_sync.get()
+
+                if event is None:
+                    logger.info("Timeout waiting for config write reply")
+                    return
+
+                if isinstance(event, GattcEvtWriteResponse):
+                    if event.status == BLEGattStatusCode.cps_cccd_config_error:
+                        logger.error("Config service not enabled")
+                        return
+                    elif event.status == BLEGattStatusCode.insuf_authentication:
+                        logger.error("Not bonded")
+                        return
+                    else:
+                        continue
+
+                if isinstance(event, GattcEvtHvx):
+                    return event
+
+    def version_get(self):
+        event = self._config_write([0x01, 0xFD])
+        if not event:
+            return
+        data = event.data
+        if len(data) >= 11 and data[2] == 1:
+            fwid = data[3] + (data[4] << 8)
+            print "Softdevice FWID:    0x%04x: %s"                  % (fwid, nrf_sd_fwid.get(fwid, ''))
+            print 'Bootloader version: %02d.%02d.%02d.rc%02d'       % (data[ 8],   data[ 7],         data[ 6],          data[ 5])
+            print 'App version:        %02d.%02d.%02d.rc%02d.%0.7x' % (data[12],   data[11],         data[10],          data[ 9],
+                                                                           data[13] + (data[14] << 8) + (data[15] << 16) + (data[16] << 24))
 
     def enable_services(self):
         self.gattc.write(self.sync_cp   + 1,   [1, 0])

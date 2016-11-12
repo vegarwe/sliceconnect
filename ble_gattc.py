@@ -17,6 +17,32 @@ class GattClient(RawBLEDriverObserver):
         self.driver         = adapter.driver
         self.driver.extended_observer_register(self)
 
+    def gap_authenticate(self, bond=True, mitm=True, le_sec_pairing=False, keypress_noti=False, io_caps=None,
+                         oob=False, min_key_size=16, max_key_size=16, kdist_own=None, kdist_peer=None):
+        # TODO Create BLEGapSecKeyDist static values with defaults
+        if not io_caps:
+            io_caps = GapIoCaps.None
+        if not kdist_own:
+            kdist_own = BLEGapSecKeyDist()
+        if not kdist_peer:
+            kdist_peer = BLEGapSecKeyDist(enc_key=True)
+        sec_params = BLEGapSecParams(bond           = bond,
+                                     mitm           = mitm,
+                                     le_sec_pairing = le_sec_pairing,
+                                     keypress_noti  = keypress_noti,
+                                     io_caps        = io_caps,
+                                     oob            = oob,
+                                     min_key_size   = min_key_size,
+                                     max_key_size   = max_key_size,
+                                     kdist_own      = kdist_own,
+                                     kdist_peer     = kdist_peer)
+        self.driver.ble_gap_authenticate(self.conn_handle, sec_params)
+
+    def read(self, attr_handle):
+        with EventSync(self.adapter, [GattcEvtReadResponse]) as evt_sync:
+            self.adapter.ble_gattc_read(self.conn_handle, attr_handle)
+            return evt_sync.get()
+
     def write(self, attr_handle, value, offset=0):
         write_params = BLEGattcWriteParams(BLEGattWriteOperation.write_req,
                                            BLEGattExecWriteFlag.unused,
@@ -24,6 +50,7 @@ class GattClient(RawBLEDriverObserver):
                                            value,
                                            offset)
         self.adapter.ble_gattc_write(self.conn_handle, write_params)
+        # TODO: Wait for HCI_NUM_COMPLETE or WRITE_RESPONSE?
 
     def service_discovery(self):
         self.driver.ble_gattc_prim_srvc_disc(conn_handle, uuid, 0x0001)
