@@ -1,27 +1,18 @@
 import logging
 import Queue
 
-from pc_ble_driver_py.exceptions    import IllegalStateException
-from pc_ble_driver_py.ble_driver    import BLEDriverObserver
-from pc_ble_driver_py.ble_driver    import BLEGattcWriteParams, BLEGattWriteOperation, BLEGattExecWriteFlag
-
 from nrf_event import *
-from fjase_ble_driver import RawBLEDriverObserver
+from fjase_ble_driver import RawBLEDriverObserver, FjaseBLEDriver
 
 logger = logging.getLogger('fjase')
 
 
-class FjaseAdapter(RawBLEDriverObserver, BLEDriverObserver):
+class FjaseAdapter(RawBLEDriverObserver):
 
     def __init__(self, driver):
         super(FjaseAdapter, self).__init__()
-        self.conn_handles       = []
-        self.peer_addr          = None
-        self.own_addr           = None
-        self.driver             = driver
-        self.notifications_q    = Queue.Queue()
-        self.event_q            = Queue.Queue()
-        self.driver.observer_register(self)
+        self.conn_handles   = []
+        self.driver         = driver
         self.driver.extended_observer_register(self)
 
         # Do poor mans inheritance
@@ -38,6 +29,12 @@ class FjaseAdapter(RawBLEDriverObserver, BLEDriverObserver):
     def open(self):
         self.driver.open()
         self.driver.ble_enable()
+
+    @classmethod
+    def open_serial(cls, serial_port, baud_rate):
+        adapter = cls(FjaseBLEDriver(serial_port=serial_port, baud_rate=baud_rate))
+        adapter.open()
+        return adapter
 
     def gap_authenticate(self, conn_handle, bond=True, mitm=True, le_sec_pairing=False, keypress_noti=False, io_caps=None,
                          oob=False, min_key_size=16, max_key_size=16, kdist_own=None, kdist_peer=None):
@@ -60,47 +57,20 @@ class FjaseAdapter(RawBLEDriverObserver, BLEDriverObserver):
                                      kdist_peer     = kdist_peer)
         self.driver.ble_gap_authenticate(conn_handle, sec_params)
 
-    def service_discovery(self):
-        logger.debug('BLE: Service Discovery...')
-        #self.adapter.service_discovery(conn_handle=self.conn_handle)
-        logger.debug('BLE: Service Discovery done')
-
-
-    def gattc_write_attr(self, conn_handle, attr_handle, value, offset=0):
-        write_params = BLEGattcWriteParams(BLEGattWriteOperation.write_req,
-                                           BLEGattExecWriteFlag.unused,
-                                           attr_handle,
-                                           value,
-                                           offset)
-        self.ble_gattc_write(conn_handle, write_params)
-
     def close(self):
-        for conn_handle in self.conn_handles:
-            logger.info('BLE: Disconnecting from target')
-            self.driver.ble_gap_disconnect(conn_handle)
-            evt, params = self.event_q.get(timeout=1)
+        with EventSync(self, [GapEvtDisconnected]) as evt_sync:
+            for conn_handle in self.conn_handles[:]:
+                logger.info('BLE: Disconnecting conn_handle %r', conn_handle)
+                self.driver.ble_gap_disconnect(conn_handle)
+                evt_sync.get(timeout=0.2) # TODO: If we know the conn_params we can be more informed about timeout
         self.driver.close()
 
     def on_event(self, ble_driver, event):
         logger.info('high level event %r', event)
-
-    def on_gap_evt_connected(self, ble_driver, conn_handle, peer_addr, own_addr, role, conn_params):
-        logger.info('BLE: Connected to {}'.format(peer_addr))
-        self.event_q.put(('BLE_GAP_EVT_CONNECTED', (conn_handle, peer_addr, own_addr, role, conn_params)))
-
-    def on_gap_evt_disconnected(self, ble_driver, conn_handle, reason):
-        self.event_q.put(('BLE_GAP_EVT_DISCONNECTED', (conn_handle, reason)))
-        self.conn_handle = None
-        logger.info('BLE: Disconnected')
-
-    def on_gap_evt_adv_report(self, ble_driver, conn_handle, peer_addr, rssi, adv_type, adv_data):
-        print "Hello", ble_driver, peer_addr.addr_type, peer_addr.addr, rssi, adv_type, adv_data
-
-    def on_gattc_evt_hvx(self, ble_driver, conn_handle, status, error_handle, attr_handle, hvx_type, data):
-        logger.info("Got notification status %s err_handle %s attr_handle %s hvx_type %s data: %r",
-                status, error_handle, attr_handle, hvx_type, ''.join(map(chr, data)))
-
-    def on_gattc_evt_write_rsp(self, ble_driver, conn_handle, status, error_handle, attr_handle, write_op, offset, data):
-        logger.info("Got write response status %s err_handle %s attr_handle %s write_op %s offset %s data: %r",
-                status, error_handle, attr_handle, write_op, offset, ''.join(map(chr, data)))
-
+        if   isinstance(event, GapEvtConnected):
+            self.conn_handles.append(event.conn_handle)
+        elif isinstance(event, GapEvtDisconnected):
+            try:
+                self.conn_handles.remove(event.conn_handle)
+            except ValueError:
+                pass

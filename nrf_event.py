@@ -3,7 +3,7 @@ import Queue
 import time
 from enum import IntEnum
 
-from pc_ble_driver_py.ble_driver import driver, util, BLEEvtID, BLEGattStatusCode, BLEDriverObserver
+from pc_ble_driver_py.ble_driver import driver, util, BLEGapAddr, BLEGapRoles, BLEGapAdvType, BLEAdvData, BLEGapConnParams, BLEHci, BLEEvtID, BLEGattStatusCode, BLEDriverObserver
 
 logger = logging.getLogger('fjase')
 
@@ -136,16 +136,17 @@ class BLEGapSecKeyset(object):
 
 
 class EventSync(BLEDriverObserver):
-    def __init__(self, adapter, event_filter=None):
+    def __init__(self, adapter, event_filter=None, callback=None):
         super(BLEDriverObserver, self).__init__()
         self._driver        = adapter.driver
         if isinstance(event_filter, (list, tuple)):
-            self._events = event_filter
-        elif classes == None:
-            self._events = None
+            self._events    = event_filter
+        elif event_filter is not None:
+            self._events    = [event_filter]
         else:
-            self._events = [event_filter]
-        self._queue         = Queue.Queue()
+            self._events    = None
+        self._callback      = callback
+        self._queue         = Queue.Queue() # TODO: Should not be unbound
 
     def _isinstance_of_event(self, event):
         if self._events == None:
@@ -156,6 +157,8 @@ class EventSync(BLEDriverObserver):
         return False
 
     def on_event(self, ble_driver, event):
+        if self._callback and self._callback(event):
+            return # Event handled by callback
         if not self._isinstance_of_event(event):
             return
         self._queue.put(event)
@@ -203,8 +206,78 @@ class BLEEvent(object):
 class GapEvt(BLEEvent):
     pass
 
+class GapEvtAdvReport(GapEvt):
+    evt_id = driver.BLE_GAP_EVT_ADV_REPORT
+
+    def __init__(self, conn_handle, peer_addr, rssi, adv_type, adv_data):
+        # TODO: What? Adv event has conn_handle? Does not compute
+        super(GapEvtAdvReport, self).__init__(conn_handle)
+        self.peer_addr     = peer_addr
+        self.rssi          = rssi
+        self.adv_type      = adv_type
+        self.adv_data      = adv_data
+
+    @classmethod
+    def from_c(cls, event):
+        adv_report_evt = event.evt.gap_evt.params.adv_report
+
+        # TODO: adv_type what? We don't have a type for scan response?
+        adv_type = None
+        if not adv_report_evt.scan_rsp:
+            adv_type = BLEGapAdvType(adv_report_evt.type)
+
+        return cls(conn_handle  = event.evt.gap_evt.conn_handle,
+                   peer_addr    = BLEGapAddr.from_c(adv_report_evt.peer_addr),
+                   rssi         = adv_report_evt.rssi,
+                   adv_type     = adv_type,
+                   adv_data     = BLEAdvData.from_c(adv_report_evt))
+
+    def __str__(self):
+        return "%s(conn_handle=%r, peer_addr=%r, rssi=%r, adv_type=%r, adv_data=%r)" % (
+                self.__class__.__name__, self.conn_handle,
+                self.peer_addr, self.rssi, self.adv_type, self.adv_data)
+
+class GapEvtConnected(GapEvt):
+    evt_id = driver.BLE_GAP_EVT_CONNECTED
+    def __init__(self, conn_handle, peer_addr, own_addr, role, conn_params):
+        super(GapEvtConnected, self).__init__(conn_handle)
+        self.peer_addr      = peer_addr
+        self.own_addr       = own_addr
+        self.role           = role
+        self.conn_params    = conn_params
+
+    @classmethod
+    def from_c(cls, event):
+        connected_evt = event.evt.gap_evt.params.connected
+        return cls(conn_handle    = event.evt.gap_evt.conn_handle,
+                   peer_addr      = BLEGapAddr.from_c(connected_evt.peer_addr),
+                   own_addr       = BLEGapAddr.from_c(connected_evt.own_addr),
+                   role           = BLEGapRoles(connected_evt.role),
+                   conn_params    = BLEGapConnParams.from_c(connected_evt.conn_params))
+
+    def __repr__(self):
+        return "%s(conn_handle=%r, peer_addr=%r, own_addr=%r, role=%r, conn_params=%r)" % (
+                self.__class__.__name__, self.conn_handle,
+                self.peer_addr, self.own_addr, self.role, self.conn_params)
+
+
 class GapEvtDisconnected(GapEvt):
     evt_id = driver.BLE_GAP_EVT_DISCONNECTED
+
+    def __init__(self, conn_handle, reason):
+        super(GapEvtDisconnected, self).__init__(conn_handle)
+        self.reason = reason
+
+    @classmethod
+    def from_c(cls, event):
+        disconnected_evt = event.evt.gap_evt.params.disconnected
+        return cls(conn_handle  = event.evt.gap_evt.conn_handle,
+                   reason       = BLEHci(disconnected_evt.reason))
+
+    def __repr__(self):
+        return "%s(conn_handle=%r, reason=%r)" % (
+                self.__class__.__name__, self.conn_handle, self.reason)
+
 
 class GapEvtSec(GapEvt):
     pass
@@ -324,22 +397,54 @@ class GattcEvtReadResponse(GattcEvt):
     @classmethod
     def from_c(cls, event):
         read_rsp = event.evt.gattc_evt.params.read_rsp
-        return cls(conn_handle     = event.evt.gattc_evt.conn_handle,
-                   status          = BLEGattStatusCode(event.evt.gattc_evt.gatt_status),
-                   error_handle    = event.evt.gattc_evt.error_handle,
-                   attr_handle     = read_rsp.handle,
-                   offset          = read_rsp.offset,
-                   data            = util.uint8_array_to_list(read_rsp.data, read_rsp.len))
+        return cls(conn_handle  = event.evt.gattc_evt.conn_handle,
+                   status       = BLEGattStatusCode(event.evt.gattc_evt.gatt_status),
+                   error_handle = event.evt.gattc_evt.error_handle,
+                   attr_handle  = read_rsp.handle,
+                   offset       = read_rsp.offset,
+                   data         = util.uint8_array_to_list(read_rsp.data, read_rsp.len))
 
     def __repr__(self):
         data = ''.join(map(chr, self.data))
         return "%s(conn_handle=%r, status=%r, error_handle=%r, attr_handle=%r, offset=%r, data=%r)" % (
-                self.__class__.__name__, self.conn_handle, self.status,
-                self.error_handle, self.attr_handle, self.offset, data)
+                self.__class__.__name__, self.conn_handle,
+                self.status, self.error_handle, self.attr_handle, self.offset, data)
 
+class GattcEvtHvx(GattcEvt):
+    evt_id = driver.BLE_GATTC_EVT_HVX
+
+    def __init__(self, conn_handle, status, error_handle, attr_handle, hvx_type, data):
+        super(GattcEvtHvx, self).__init__(conn_handle)
+        self.status         = status
+        self.error_handle   = error_handle
+        self.attr_handle    = attr_handle
+        self.offset         = offset
+        if isinstance(data, str):
+            self.data       = map(ord, data)
+        else:
+            self.data       = data
+
+    @classmethod
+    def from_c(cls, event):
+        hvx_evt = ble_event.evt.gattc_evt.params.hvx
+        return cls(conn_handle  = event.evt.gattc_evt.conn_handle,
+                   status       = BLEGattStatusCode(ble_event.evt.gattc_evt.gatt_status),
+                   error_handle = ble_event.evt.gattc_evt.error_handle,
+                   attr_handle  = hvx_evt.handle,
+                   hvx_type     = BLEGattHVXType(hvx_evt.type),
+                   data         = util.uint8_array_to_list(hvx_evt.data, hvx_evt.len))
+
+    def __repr__(self):
+        data = ''.join(map(chr, self.data))
+        return "%s(conn_handle=%r, status=%r, error_handle=%r, attr_handle=%r, offset=%r, data=%r)" % (
+                self.__class__.__name__, self.conn_handle,
+                self.status, self.error_handle, self.attr_handle, self.evt_id, data)
 
 def event_decode(event):
-    if   event.header.evt_id == GattcEvtReadResponse.evt_id:    return GattcEvtReadResponse.from_c(event)
+    if   event.header.evt_id == GapEvtAdvReport.evt_id:         return GapEvtAdvReport.from_c(event)
+    elif event.header.evt_id == GapEvtConnected.evt_id:         return GapEvtConnected.from_c(event)
+    elif event.header.evt_id == GapEvtDisconnected.evt_id:      return GapEvtDisconnected.from_c(event)
+
     elif event.header.evt_id == GapEvtSecParamsRequest.evt_id:  return GapEvtSecParamsRequest.from_c(event)
     elif event.header.evt_id == GapEvtAuthKeyRequest.evt_id:    return GapEvtAuthKeyRequest.from_c(event)
     elif event.header.evt_id == GapEvtConnSecUpdate.evt_id:     return GapEvtConnSecUpdate.from_c(event)
@@ -350,3 +455,14 @@ def event_decode(event):
     #elif event.header.evt_id == driver.BLE_GAP_EVT_SEC_REQUEST:
     #    logger.info('BLE_GAP_EVT_SEC_REQUEST')
     #    return True
+
+    #elif evt_id == BLEEvtID.gap_evt_timeout:
+    #    timeout_evt = event.evt.gap_evt.params.timeout
+
+    #    for obs in self.observers:
+    #        obs.on_gap_evt_timeout(ble_driver   = self,
+    #                               conn_handle  = event.evt.gap_evt.conn_handle,
+    #                               src          = BLEGapTimeoutSrc(timeout_evt.src))
+
+    elif event.header.evt_id == GattcEvtReadResponse.evt_id:    return GattcEvtReadResponse.from_c(event)
+    elif event.header.evt_id == GattcEvtHvx.evt_id:             return GapEvtHvx.from_c(event)
