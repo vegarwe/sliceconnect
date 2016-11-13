@@ -1,14 +1,27 @@
 import logging
 import wrapt
-from threading  import Lock
-from types      import NoneType
+from threading                      import Lock
+from types                          import NoneType
 
-from nrf_event import *
-from nrf_types import *
-from pc_ble_driver_py.ble_driver import driver, util, NordicSemiErrorCheck
+from nrf_dll_load                   import driver, util
+from pc_ble_driver_py.exceptions    import NordicSemiException
+from nrf_event                      import *
+from nrf_types                      import *
 
-logger = logging.getLogger('fjase') # TODO: Find better logger
+logger = logging.getLogger(__name__)
 
+
+def NordicSemiErrorCheck(wrapped=None, expected = driver.NRF_SUCCESS):
+    if wrapped is None:
+        return functools.partial(NordicSemiErrorCheck, expected=expected)
+
+    @wrapt.decorator
+    def wrapper(wrapped, instance, args, kwargs):
+        err_code = wrapped(*args, **kwargs)
+        if err_code != expected:
+            raise NordicSemiException('Failed to {}. Error code: {}'.format(wrapped.__name__, err_code))
+
+    return wrapper(wrapped)
 
 class NrfDriverObserver(object):
     def on_event(self, nrf_driver, event):

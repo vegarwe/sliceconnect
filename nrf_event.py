@@ -1,77 +1,8 @@
-import logging
-import Queue
-import time
 from enum import IntEnum
 
-from pc_ble_driver_py.ble_driver import driver, util, BLEDriverObserver
-from pc_ble_driver_py.ble_driver import BLEHci, BLEEvtID, BLEAdvData
-from pc_ble_driver_py.ble_driver import BLEGapAddr, BLEGapRoles, BLEGapAdvType, BLEGapConnParams
-from pc_ble_driver_py.ble_driver import BLEGattStatusCode, BLEGattWriteOperation, BLEGattHVXType
+from nrf_dll_load   import driver, util
+from nrf_types      import *
 
-logger = logging.getLogger('fjase')
-
-
-class EventSync(BLEDriverObserver):
-    def __init__(self, adapter, event_filter=None, callback=None):
-        super(BLEDriverObserver, self).__init__()
-        self._driver        = adapter.driver
-        if isinstance(event_filter, (list, tuple)):
-            self._events    = event_filter
-        elif event_filter is not None:
-            self._events    = [event_filter]
-        else:
-            self._events    = None
-        self._callback      = callback
-        self._queue         = Queue.Queue() # TODO: Should not be unbound
-
-    def _isinstance_of_event(self, event):
-        if self._events == None:
-            return True
-        for _class in self._events:
-            if isinstance(event, _class):
-                return True
-        return False
-
-    def on_event(self, ble_driver, event):
-        if self._callback and self._callback(event):
-            return # Event handled by callback
-        if not self._isinstance_of_event(event):
-            return
-        self._queue.put(event)
-
-    def get(self, block=True, timeout=1):
-        return self._queue.get(block, timeout)
-
-    # TODO: Needs more testing!!!!
-    def get_specific(self, event_type=None, block=True, timeout=None):
-        start_time = time.time()
-        while True:
-            try:
-                event = self._queue.get(block, min(timeout, .1))
-                if not event_type:
-                    return event
-                if event_type and isinstance(event, event_type):
-                    return event
-                if time.time() - start_time > timeout:
-                    return event
-            except Queue.Empty:
-                if not block:
-                    return None
-                if time.time() - start_time > timeout:
-                    return None
-
-    def register_as_observer(self):
-        self._driver.observer_register(self)
-
-    def unregister_as_observer(self):
-        self._driver.observer_unregister(self)
-
-    def __enter__(self):
-        self.register_as_observer()
-        return self
-
-    def __exit__(self, type, value, traceback):
-        self.unregister_as_observer()
 
 class BLEEvent(object):
     evt_id = None
@@ -379,22 +310,103 @@ class GattcEvtWriteResponse(GattcEvt):
                 self.__class__.__name__, self.conn_handle,
                 self.status, self.error_handle, self.attr_handle, self.write_op, self.offset, data)
 
-def event_decode(event):
-    if   event.header.evt_id == GapEvtAdvReport.evt_id:         return GapEvtAdvReport.from_c(event)
-    elif event.header.evt_id == GapEvtConnected.evt_id:         return GapEvtConnected.from_c(event)
-    elif event.header.evt_id == GapEvtDisconnected.evt_id:      return GapEvtDisconnected.from_c(event)
-    elif event.header.evt_id == GapEvtTimeout.evt_id:           return GapEvtTimeout.from_c(event)
 
-    elif event.header.evt_id == GapEvtSecParamsRequest.evt_id:  return GapEvtSecParamsRequest.from_c(event)
-    elif event.header.evt_id == GapEvtAuthKeyRequest.evt_id:    return GapEvtAuthKeyRequest.from_c(event)
-    elif event.header.evt_id == GapEvtConnSecUpdate.evt_id:     return GapEvtConnSecUpdate.from_c(event)
-    elif event.header.evt_id == GapEvtAuthStatus.evt_id:        return GapEvtAuthStatus.from_c(event)
+class GattcEvtPrimaryServicecDiscoveryResponse(GattcEvt):
+    evt_id = driver.BLE_GATTC_EVT_PRIM_SRVC_DISC_RSP
+
+    def __init__(self, conn_handle, status, services):
+        super(GattcEvtPrimaryServicecDiscoveryResponse, self).__init__(conn_handle)
+        self.status         = status
+        self.services       = services
+
+    @classmethod
+    def from_c(cls, event):
+        prim_srvc_disc_rsp_evt = ble_event.evt.gattc_evt.params.prim_srvc_disc_rsp
+
+        services = list()
+        for s in util.service_array_to_list(prim_srvc_disc_rsp_evt.services, prim_srvc_disc_rsp_evt.count):
+            services.append(BLEService.from_c(s))
+
+        return cls(conn_handle  = event.evt.gattc_evt.conn_handle,
+                   status       = BLEGattStatusCode(ble_event.evt.gattc_evt.gatt_status),
+                   services     = services)
+
+    def __repr__(self):
+        return "%s(conn_handle=%r, status=%r, services=%r)" % (
+                self.__class__.__name__, self.conn_handle,
+                self.status, self.services)
+
+class GattcEvtCharacteristicDiscoveryResponse(GattcEvt):
+    evt_id = driver.BLE_GATTC_EVT_CHAR_DISC_RSP
+
+    def __init__(self, conn_handle, status, characteristics):
+        super(GattcEvtCharacteristicDiscoveryResponse, self).__init__(conn_handle)
+        self.status             = status
+        self.characteristics    = characteristics
+
+    @classmethod
+    def from_c(cls, event):
+        char_disc_rsp_evt = ble_event.evt.gattc_evt.params.char_disc_rsp
+
+        characteristics = list()
+        for ch in util.ble_gattc_char_array_to_list(char_disc_rsp_evt.chars, char_disc_rsp_evt.count):
+            characteristics.append(BLECharacteristic.from_c(ch))
+
+        return cls(conn_handle  = event.evt.gattc_evt.conn_handle,
+                   status           = BLEGattStatusCode(ble_event.evt.gattc_evt.gatt_status),
+                   characteristics  = characteristics)
+
+    def __repr__(self):
+        return "%s(conn_handle=%r, status=%r, characteristics=%r)" % (
+                self.__class__.__name__, self.conn_handle,
+                self.status, self.characteristics)
+
+class GattcEvtDescriptorDiscoveryResponse(GattcEvt):
+    evt_id = driver.BLE_GATTC_EVT_DESC_DISC_RSP
+
+    def __init__(self, conn_handle, status, descriptions):
+        super(GattcEvtDescriptorDiscoveryResponse, self).__init__(conn_handle)
+        self.status         = status
+        self.descriptions   = descriptions
+
+    @classmethod
+    def __repr__(self):
+        desc_disc_rsp_evt = ble_event.evt.gattc_evt.params.desc_disc_rsp
+
+        descriptions = list()
+        for d in util.desc_array_to_list(desc_disc_rsp_evt.descs, desc_disc_rsp_evt.count):
+            descriptions.append(BLEDescriptor.from_c(d))
+
+        return cls(conn_handle  = event.evt.gattc_evt.conn_handle,
+                   status       = BLEGattStatusCode(ble_event.evt.gattc_evt.gatt_status),
+                   descriptions = descriptions)
+
+    def __repr__(self):
+        return "%s(conn_handle=%r, status=%r, descriptions=%r)" % (
+                self.__class__.__name__, self.conn_handle,
+                self.status, self.descriptions)
+
+
+
+def event_decode(event):
+    if   event.header.evt_id == GapEvtAdvReport.evt_id:                             return GapEvtAdvReport.from_c(event)
+    elif event.header.evt_id == GapEvtConnected.evt_id:                             return GapEvtConnected.from_c(event)
+    elif event.header.evt_id == GapEvtDisconnected.evt_id:                          return GapEvtDisconnected.from_c(event)
+    elif event.header.evt_id == GapEvtTimeout.evt_id:                               return GapEvtTimeout.from_c(event)
+
+    elif event.header.evt_id == GapEvtSecParamsRequest.evt_id:                      return GapEvtSecParamsRequest.from_c(event)
+    elif event.header.evt_id == GapEvtAuthKeyRequest.evt_id:                        return GapEvtAuthKeyRequest.from_c(event)
+    elif event.header.evt_id == GapEvtConnSecUpdate.evt_id:                         return GapEvtConnSecUpdate.from_c(event)
+    elif event.header.evt_id == GapEvtAuthStatus.evt_id:                            return GapEvtAuthStatus.from_c(event)
     #elif event.header.evt_id == driver.BLE_GAP_EVT_SEC_INFO_REQUEST:
     #elif event.header.evt_id == driver.BLE_GAP_EVT_SEC_REQUEST:
 
-    elif event.header.evt_id == EvtTxComplete.evt_id:           return EvtTxComplete.from_c(event)
+    elif event.header.evt_id == EvtTxComplete.evt_id:                               return EvtTxComplete.from_c(event)
 
-    elif event.header.evt_id == GattcEvtReadResponse.evt_id:    return GattcEvtReadResponse.from_c(event)
-    elif event.header.evt_id == GattcEvtHvx.evt_id:             return GattcEvtHvx.from_c(event)
-    elif event.header.evt_id == GattcEvtWriteResponse.evt_id:   return GattcEvtWriteResponse.from_c(event)
+    elif event.header.evt_id == GattcEvtReadResponse.evt_id:                        return GattcEvtReadResponse.from_c(event)
+    elif event.header.evt_id == GattcEvtHvx.evt_id:                                 return GattcEvtHvx.from_c(event)
+    elif event.header.evt_id == GattcEvtWriteResponse.evt_id:                       return GattcEvtWriteResponse.from_c(event)
+    elif event.header.evt_id == GattcEvtPrimaryServicecDiscoveryResponse.evt_id:    return GattcEvtPrimaryServicecDiscoveryResponse.from_c(event)
+    elif event.header.evt_id == GattcEvtCharacteristicDiscoveryResponse.evt_id:     return GattcEvtCharacteristicDiscoveryResponse.from_c(event)
+    elif event.header.evt_id == GattcEvtDescriptorDiscoveryResponse.evt_id:         return GattcEvtDescriptorDiscoveryResponse.from_c(event)
 

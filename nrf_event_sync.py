@@ -25,7 +25,7 @@ class EventSync(NrfDriverObserver):
                 return True
         return False
 
-    def on_event(self, ble_driver, event):
+    def on_event(self, nrf_driver, event):
         if self._callback and self._callback(event):
             return # Event handled by callback
         if not self._isinstance_of_event(event):

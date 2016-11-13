@@ -1,26 +1,13 @@
+import logging
 from enum       import Enum
 from types      import NoneType
 
-from pc_ble_driver_py.ble_driver import driver, util
+from nrf_dll_load import driver, util
+
+logger = logging.getLogger(__name__)
+
 
 #################### Common ################
-
-class BLEEvtID(Enum):
-    gap_evt_connected                 = driver.BLE_GAP_EVT_CONNECTED
-    gap_evt_disconnected              = driver.BLE_GAP_EVT_DISCONNECTED
-    gap_evt_adv_report                = driver.BLE_GAP_EVT_ADV_REPORT
-    gap_evt_timeout                   = driver.BLE_GAP_EVT_TIMEOUT
-    gap_evt_conn_param_update_request = driver.BLE_GAP_EVT_CONN_PARAM_UPDATE_REQUEST
-    gap_evt_conn_param_update         = driver.BLE_GAP_EVT_CONN_PARAM_UPDATE
-    evt_tx_complete                   = driver.BLE_EVT_TX_COMPLETE
-    gattc_evt_write_rsp               = driver.BLE_GATTC_EVT_WRITE_RSP
-    gattc_evt_read_rsp                = driver.BLE_GATTC_EVT_READ_RSP
-    gattc_evt_hvx                     = driver.BLE_GATTC_EVT_HVX
-    gattc_evt_prim_srvc_disc_rsp      = driver.BLE_GATTC_EVT_PRIM_SRVC_DISC_RSP
-    gattc_evt_char_disc_rsp           = driver.BLE_GATTC_EVT_CHAR_DISC_RSP
-    gattc_evt_desc_disc_rsp           = driver.BLE_GATTC_EVT_DESC_DISC_RSP
-
-
 class BLEHci(Enum):
     success                                     = driver.BLE_HCI_STATUS_CODE_SUCCESS
     unknown_btle_command                        = driver.BLE_HCI_STATUS_CODE_UNKNOWN_BTLE_COMMAND

@@ -1,7 +1,7 @@
 import json
 import os
 
-from pc_ble_driver_py.ble_driver import BLEGapAddr
+from nrf_types import BLEGapAddr
 
 
 DATA_STORE = os.path.join(os.path.expanduser('~'), 'bonds.json')

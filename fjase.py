@@ -2,12 +2,13 @@ import logging
 import time
 from datetime import datetime
 
+from nrf_dll_load       import util
 from pc_ble_driver_py.exceptions import NordicSemiException
-from pc_ble_driver_py.ble_driver import util
 
 import bond_store
 from nrf_adapter        import NrfAdapter
 from nrf_event          import *
+from nrf_event_sync     import EventSync
 from nrf_serial_no      import nrf_sd_fwid
 from nrf_types          import *
 from ble_gattc          import GattClient
@@ -247,7 +248,7 @@ def main(args):
     slice_device.connect()
     slice_device.authenticate()
 
-    #slice_device.gattc.service_discovery()
+    slice_device.gattc.service_discovery()
     #time.sleep(1)
     #slice_device.time((datetime.now() - datetime.utcfromtimestamp(0)).total_seconds())
     #time.sleep(1)

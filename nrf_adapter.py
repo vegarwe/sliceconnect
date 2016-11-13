@@ -3,8 +3,9 @@ import Queue
 
 from nrf_event import *
 from nrf_driver import NrfDriverObserver, NrfDriver
+from nrf_event_sync     import EventSync
 
-logger = logging.getLogger('fjase')
+logger = logging.getLogger(__name__)
 
 
 class NrfAdapter(NrfDriverObserver):
@@ -45,7 +46,7 @@ class NrfAdapter(NrfDriverObserver):
         self.driver.observer_unregister(self)
         self.driver.close()
 
-    def on_event(self, ble_driver, event):
+    def on_event(self, nrf_driver, event):
         if   isinstance(event, GapEvtConnected):
             self.conn_handles.append(event.conn_handle)
         elif isinstance(event, GapEvtDisconnected):
