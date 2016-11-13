@@ -2,14 +2,14 @@ import logging
 import time
 from datetime import datetime
 
-from pc_ble_driver_py.exceptions    import NordicSemiException
-from pc_ble_driver_py.ble_driver    import util
+from pc_ble_driver_py.exceptions import NordicSemiException
+from pc_ble_driver_py.ble_driver import util
 
 import bond_store
+from nrf_adapter        import NrfAdapter
 from nrf_event          import *
 from nrf_serial_no      import nrf_sd_fwid
 from nrf_types          import *
-from fjase_ble_adapter  import FjaseAdapter
 from ble_gattc          import GattClient
 
 
@@ -44,7 +44,7 @@ def _get_time(time_stamp = None):
         time_stamp = int(time_stamp) # Make sure we drop second fractions
     return _int_to_le(time_stamp)
 
-class Fjase(object):
+class Slice(object):
     dfu_cp      = 0x0027
     stream_cp   = 0x002b
     sync_cp     = 0x0031
@@ -232,7 +232,7 @@ class Fjase(object):
 
 
 def main(args):
-    adapter = FjaseAdapter.open_serial(serial_port=args.device, baud_rate=115200)
+    adapter = NrfAdapter.open_serial(serial_port=args.device, baud_rate=115200)
 
     ## Scan for devices
     #def adv_callback(event):
@@ -243,7 +243,7 @@ def main(args):
     #    time.sleep(.5)
     #    adapter.ble_gap_scan_stop()
 
-    slice_device = Fjase(adapter, BLEGapAddr.from_string(ADDR_DEV))
+    slice_device = Slice(adapter, BLEGapAddr.from_string(ADDR_DEV))
     slice_device.connect()
     slice_device.authenticate()
 

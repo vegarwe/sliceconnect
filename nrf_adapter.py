@@ -7,10 +7,10 @@ from nrf_driver import NrfDriverObserver, NrfDriver
 logger = logging.getLogger('fjase')
 
 
-class FjaseAdapter(NrfDriverObserver):
+class NrfAdapter(NrfDriverObserver):
 
     def __init__(self, driver):
-        super(FjaseAdapter, self).__init__()
+        super(NrfAdapter, self).__init__()
         self.conn_handles   = []
         self.driver         = driver
         self.driver.observer_register(self)
