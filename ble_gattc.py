@@ -1,21 +1,20 @@
 import logging
 
-from pc_ble_driver_py.ble_driver    import BLEGattcWriteParams, BLEGattWriteOperation, BLEGattExecWriteFlag
-
 from nrf_event import *
-from fjase_ble_driver import RawBLEDriverObserver
+from nrf_types import *
+from nrf_driver import NrfDriverObserver
 
 logger = logging.getLogger('fjase')
 
 
-class GattClient(RawBLEDriverObserver):
+class GattClient(NrfDriverObserver):
 
     def __init__(self, adapter, conn_handle):
         super(GattClient, self).__init__()
         self.conn_handle    = conn_handle
         self.adapter        = adapter
         self.driver         = adapter.driver
-        self.driver.extended_observer_register(self)
+        self.driver.observer_register(self)
 
     def gap_authenticate(self, bond=True, mitm=True, le_sec_pairing=False, keypress_noti=False, io_caps=None,
                          oob=False, min_key_size=16, max_key_size=16, kdist_own=None, kdist_peer=None):

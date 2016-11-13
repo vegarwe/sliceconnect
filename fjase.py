@@ -2,14 +2,13 @@ import logging
 import time
 from datetime import datetime
 
-from pc_ble_driver_py.exceptions    import NordicSemiException, IllegalStateException
+from pc_ble_driver_py.exceptions    import NordicSemiException
 from pc_ble_driver_py.ble_driver    import util
-from pc_ble_driver_py.ble_driver    import BLEGapAddr, BLEGapConnParams
 
 import bond_store
 from nrf_event          import *
 from nrf_serial_no      import nrf_sd_fwid
-from fjase_ble_driver   import RawBLEDriverObserver
+from nrf_types          import *
 from fjase_ble_adapter  import FjaseAdapter
 from ble_gattc          import GattClient
 

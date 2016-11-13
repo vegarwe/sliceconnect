@@ -2,18 +2,18 @@ import logging
 import Queue
 
 from nrf_event import *
-from fjase_ble_driver import RawBLEDriverObserver, FjaseBLEDriver
+from nrf_driver import NrfDriverObserver, NrfDriver
 
 logger = logging.getLogger('fjase')
 
 
-class FjaseAdapter(RawBLEDriverObserver):
+class FjaseAdapter(NrfDriverObserver):
 
     def __init__(self, driver):
         super(FjaseAdapter, self).__init__()
         self.conn_handles   = []
         self.driver         = driver
-        self.driver.extended_observer_register(self)
+        self.driver.observer_register(self)
 
         # Do poor mans inheritance
         self.ble_gap_scan_start         = self.driver.ble_gap_scan_start
@@ -28,7 +28,7 @@ class FjaseAdapter(RawBLEDriverObserver):
 
     @classmethod
     def open_serial(cls, serial_port, baud_rate):
-        adapter = cls(FjaseBLEDriver(serial_port=serial_port, baud_rate=baud_rate))
+        adapter = cls(NrfDriver(serial_port=serial_port, baud_rate=baud_rate))
         adapter.open()
         return adapter
 
@@ -42,6 +42,7 @@ class FjaseAdapter(RawBLEDriverObserver):
                 logger.info('BLE: Disconnecting conn_handle %r', conn_handle)
                 self.driver.ble_gap_disconnect(conn_handle)
                 evt_sync.get(timeout=0.2) # TODO: If we know the conn_params we can be more informed about timeout
+        self.driver.observer_unregister(self)
         self.driver.close()
 
     def on_event(self, ble_driver, event):
