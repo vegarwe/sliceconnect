@@ -2,6 +2,11 @@ import logging
 import time
 from datetime import datetime
 
+
+# TODO(vw): Fix. Hard code NRF51 for now
+from pc_ble_driver_py import config
+config.__conn_ic_id__ = 'NRF51'
+
 from nrf_dll_load       import util
 from pc_ble_driver_py.exceptions import NordicSemiException
 
@@ -238,14 +243,14 @@ class Slice(object):
 def main(args):
     adapter = NrfAdapter.open_serial(serial_port=args.device, baud_rate=115200)
 
-    ## Scan for devices
-    #def adv_callback(event):
-    #    print 'hello', repr(event)
-    #    return True
-    #with EventSync(adapter, GapEvtAdvReport, callback=adv_callback) as evt_sync:
-    #    adapter.ble_gap_scan_start()
-    #    time.sleep(.5)
-    #    adapter.ble_gap_scan_stop()
+    # Scan for devices
+    def adv_callback(event):
+        print 'hello', repr(event)
+        return True
+    with EventSync(adapter, GapEvtAdvReport, callback=adv_callback) as evt_sync:
+        adapter.ble_gap_scan_start()
+        time.sleep(.5)
+        adapter.ble_gap_scan_stop()
 
     slice_device = Slice(adapter, BLEGapAddr.from_string(ADDR_DEV))
     slice_device.connect()
@@ -266,6 +271,9 @@ def main(args):
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(prog='slice_test')
-    parser.add_argument("-d", "--device", dest="device", help="Select master device")
-    main(parser.parse_args())
+    parser.add_argument("-d", "--device", dest="device",                    help="Select master device")
+    #parser.add_argument("-f", "--family", dest="family", default='NRF51',   help="Choose IC family")
+    args = parser.parse_args()
+
+    main(args)
 
