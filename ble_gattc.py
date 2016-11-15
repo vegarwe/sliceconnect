@@ -53,73 +53,80 @@ class GattClient(NrfDriverObserver):
         # TODO: Wait for HCI_NUM_COMPLETE or WRITE_RESPONSE?
 
     def service_discovery(self, uuid=None):
-        return
         classes = [GattcEvtReadResponse,
-                   GattcEvtPrimaryServicecDiscoveryResponse,
                    GattcEvtCharacteristicDiscoveryResponse,
                    GattcEvtDescriptorDiscoveryResponse]
-        with EventSync(self.adapter, classes) as evt_sync:
+        with EventSync(self.adapter, GattcEvtPrimaryServicecDiscoveryResponse) as evt_sync:
             self.driver.ble_gattc_prim_srvc_disc(self.conn_handle, uuid, 0x0001)
+            services = []
             while True:
                 event = evt_sync.get()
 
                 if isinstance(event, GattcEvtPrimaryServicecDiscoveryResponse):
-                    print 'services', event.services
-                    self.db_conns[conn_handle].services.extend(response['services'])
-                elif response['status'] == BLEGattStatusCode.attribute_not_found:
+                    services.extend(event.services)
+                elif event.status == BLEGattStatusCode.attribute_not_found:
                     break
                 else:
-                    return response['status']
+                    return event.status
 
-                if response['services'][-1].end_handle == 0xFFFF:
+                if event.services[-1].end_handle == 0xFFFF:
                     break
                 else:
-                    self.driver.ble_gattc_prim_srvc_disc(self.conn_handle,
-                                                         uuid,
-                                                         response['services'][-1].end_handle + 1)
+                    self.driver.ble_gattc_prim_srvc_disc(self.conn_handle, uuid, event.services[-1].end_handle + 1)
 
-            print response, self.db_conns[conn_handle]
-
-            for s in self.db_conns[conn_handle].services:
-                print s.start_handle, s.end_handle
-                self.driver.ble_gattc_char_disc(self.conn_handle, s.start_handle, s.end_handle)
+        classes = [GattcEvtReadResponse,
+                   GattcEvtCharacteristicDiscoveryResponse,
+                   GattcEvtDescriptorDiscoveryResponse]
+        with EventSync(self.adapter, classes) as evt_sync:
+            for service in services:
+                self.driver.ble_gattc_char_disc(self.conn_handle, service.start_handle, service.end_handle)
                 while True:
-                    response = self.evt_sync[conn_handle].wait(evt = BLEEvtID.gattc_evt_char_disc_rsp)
+                    event = evt_sync.get()
 
-                    if response['status'] == BLEGattStatusCode.success:
-                        map(s.char_add, response['characteristics'])
-                    elif response['status'] == BLEGattStatusCode.attribute_not_found:
+                    if event.status == BLEGattStatusCode.success:
+                        map(service.char_add, event.characteristics)
+                    elif event.status == BLEGattStatusCode.attribute_not_found:
                         break
                     else:
-                        return response['status']
+                        return event.status
 
                     self.driver.ble_gattc_char_disc(self.conn_handle,
-                                                    response['characteristics'][-1].handle_decl + 1,
-                                                    s.end_handle)
+                                                    event.characteristics[-1].handle_decl + 1,
+                                                    service.end_handle)
 
-                for ch in s.chars:
-                    self.driver.ble_gattc_desc_disc(self.conn_handle, ch.handle_value, ch.end_handle)
+                for char in service.chars:
+                    self.driver.ble_gattc_desc_disc(self.conn_handle, char.handle_value, char.end_handle)
                     while True:
-                        response = self.evt_sync[conn_handle].wait(evt = BLEEvtID.gattc_evt_desc_disc_rsp)
+                        event = evt_sync.get()
 
-                        if response['status'] == BLEGattStatusCode.success:
-                            ch.descs.extend(response['descriptions'])
-                        elif response['status'] == BLEGattStatusCode.attribute_not_found:
+                        if event.status == BLEGattStatusCode.success:
+                            char.descs.extend(event.descriptions)
+                        elif event.status == BLEGattStatusCode.attribute_not_found:
                             break
                         else:
-                            return response['status']
+                            return event.status
 
-                        if response['descriptions'][-1].handle == ch.end_handle:
+                        if event.descriptions[-1].handle == char.end_handle:
                             break
                         else:
                             self.driver.ble_gattc_desc_disc(self.conn_handle,
-                                                            response['descriptions'][-1].handle + 1,
-                                                            ch.end_handle)
+                                                            event.descriptions[-1].handle + 1,
+                                                            char.end_handle)
 
     def on_event(self, nrf_driver, event):
         pass
-        logger.info('high level event %r', event)
-        #if   isinstance(event, GapEvtConnected):
-        #    self.conn_handles.append(event.conn_handle)
-        #elif isinstance(event, GapEvtDisconnected):
-        #    self.conn_handle.remove(event.conn_handle)
+        if   isinstance(event, GapEvtConnected):
+            pass #    self.conn_handles.append(event.conn_handle)
+        elif isinstance(event, GapEvtDisconnected):
+            pass #    self.conn_handle.remove(event.conn_handle)
+        elif isinstance(event, GattcEvtPrimaryServicecDiscoveryResponse):
+            for service in event.services:
+                logger.debug('New service uuid: %s, start handle: %02x, end handle: %02x',
+                    service.uuid, service.start_handle, service.end_handle)
+        elif isinstance(event, GattcEvtDescriptorDiscoveryResponse):
+            for descriptor in event.descriptions:
+                logger.debug('New descriptor uuid: %s, handle: %02x', descriptor.uuid, descriptor.handle)
+        elif isinstance(event, GattcEvtCharacteristicDiscoveryResponse):
+            for characteristic in event.characteristics:
+                logger.debug('New characteristic uuid: %s, declaration handle: %02x, value handle: %02x',
+                        characteristic.uuid, characteristic.handle_decl, characteristic.handle_value)
