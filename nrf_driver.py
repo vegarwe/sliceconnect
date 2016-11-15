@@ -346,14 +346,15 @@ class NrfDriver(object):
             logger.exception("Event handling failed")
 
     @wrapt.synchronized(observer_lock)
-    def _sync_evt_handler(self, adapter, event):
-        logger.info('event %r', event.header.evt_id)
+    def _sync_evt_handler(self, adapter, ble_event):
+        #logger.info('event %r', event.header.evt_id)
 
         if len(self.observers) == 0:
             return
 
-        event = event_decode(event)
+        event = event_decode(ble_event)
         if event is None:
+            logger.warn('unknown ble_event %r (discarded)', ble_event.header.evt_id)
             return
 
         for obs in self.observers:
