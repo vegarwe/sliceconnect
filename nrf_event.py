@@ -321,14 +321,14 @@ class GattcEvtPrimaryServicecDiscoveryResponse(GattcEvt):
 
     @classmethod
     def from_c(cls, event):
-        prim_srvc_disc_rsp_evt = ble_event.evt.gattc_evt.params.prim_srvc_disc_rsp
+        prim_srvc_disc_rsp_evt = event.evt.gattc_evt.params.prim_srvc_disc_rsp
 
         services = list()
         for s in util.service_array_to_list(prim_srvc_disc_rsp_evt.services, prim_srvc_disc_rsp_evt.count):
             services.append(BLEService.from_c(s))
 
         return cls(conn_handle  = event.evt.gattc_evt.conn_handle,
-                   status       = BLEGattStatusCode(ble_event.evt.gattc_evt.gatt_status),
+                   status       = BLEGattStatusCode(event.evt.gattc_evt.gatt_status),
                    services     = services)
 
     def __repr__(self):
@@ -346,14 +346,14 @@ class GattcEvtCharacteristicDiscoveryResponse(GattcEvt):
 
     @classmethod
     def from_c(cls, event):
-        char_disc_rsp_evt = ble_event.evt.gattc_evt.params.char_disc_rsp
+        char_disc_rsp_evt = event.evt.gattc_evt.params.char_disc_rsp
 
         characteristics = list()
         for ch in util.ble_gattc_char_array_to_list(char_disc_rsp_evt.chars, char_disc_rsp_evt.count):
             characteristics.append(BLECharacteristic.from_c(ch))
 
         return cls(conn_handle  = event.evt.gattc_evt.conn_handle,
-                   status           = BLEGattStatusCode(ble_event.evt.gattc_evt.gatt_status),
+                   status           = BLEGattStatusCode(event.evt.gattc_evt.gatt_status),
                    characteristics  = characteristics)
 
     def __repr__(self):
@@ -370,15 +370,15 @@ class GattcEvtDescriptorDiscoveryResponse(GattcEvt):
         self.descriptions   = descriptions
 
     @classmethod
-    def __repr__(self):
-        desc_disc_rsp_evt = ble_event.evt.gattc_evt.params.desc_disc_rsp
+    def from_c(cls, event):
+        desc_disc_rsp_evt = event.evt.gattc_evt.params.desc_disc_rsp
 
         descriptions = list()
         for d in util.desc_array_to_list(desc_disc_rsp_evt.descs, desc_disc_rsp_evt.count):
             descriptions.append(BLEDescriptor.from_c(d))
 
         return cls(conn_handle  = event.evt.gattc_evt.conn_handle,
-                   status       = BLEGattStatusCode(ble_event.evt.gattc_evt.gatt_status),
+                   status       = BLEGattStatusCode(event.evt.gattc_evt.gatt_status),
                    descriptions = descriptions)
 
     def __repr__(self):
@@ -388,25 +388,31 @@ class GattcEvtDescriptorDiscoveryResponse(GattcEvt):
 
 
 
-def event_decode(event):
-    if   event.header.evt_id == GapEvtAdvReport.evt_id:                             return GapEvtAdvReport.from_c(event)
-    elif event.header.evt_id == GapEvtConnected.evt_id:                             return GapEvtConnected.from_c(event)
-    elif event.header.evt_id == GapEvtDisconnected.evt_id:                          return GapEvtDisconnected.from_c(event)
-    elif event.header.evt_id == GapEvtTimeout.evt_id:                               return GapEvtTimeout.from_c(event)
+def event_decode(ble_event):
+    event_classes = [
+            GapEvtAdvReport,
+            GapEvtConnected,
+            GapEvtDisconnected,
+            GapEvtTimeout,
 
-    elif event.header.evt_id == GapEvtSecParamsRequest.evt_id:                      return GapEvtSecParamsRequest.from_c(event)
-    elif event.header.evt_id == GapEvtAuthKeyRequest.evt_id:                        return GapEvtAuthKeyRequest.from_c(event)
-    elif event.header.evt_id == GapEvtConnSecUpdate.evt_id:                         return GapEvtConnSecUpdate.from_c(event)
-    elif event.header.evt_id == GapEvtAuthStatus.evt_id:                            return GapEvtAuthStatus.from_c(event)
-    #elif event.header.evt_id == driver.BLE_GAP_EVT_SEC_INFO_REQUEST:
-    #elif event.header.evt_id == driver.BLE_GAP_EVT_SEC_REQUEST:
+            GapEvtSecParamsRequest,
+            GapEvtAuthKeyRequest,
+            GapEvtConnSecUpdate,
+            GapEvtAuthStatus,
+            # driver.BLE_GAP_EVT_SEC_INFO_REQUEST,
+            # driver.BLE_GAP_EVT_SEC_REQUEST,
 
-    elif event.header.evt_id == EvtTxComplete.evt_id:                               return EvtTxComplete.from_c(event)
+            EvtTxComplete,
 
-    elif event.header.evt_id == GattcEvtReadResponse.evt_id:                        return GattcEvtReadResponse.from_c(event)
-    elif event.header.evt_id == GattcEvtHvx.evt_id:                                 return GattcEvtHvx.from_c(event)
-    elif event.header.evt_id == GattcEvtWriteResponse.evt_id:                       return GattcEvtWriteResponse.from_c(event)
-    elif event.header.evt_id == GattcEvtPrimaryServicecDiscoveryResponse.evt_id:    return GattcEvtPrimaryServicecDiscoveryResponse.from_c(event)
-    elif event.header.evt_id == GattcEvtCharacteristicDiscoveryResponse.evt_id:     return GattcEvtCharacteristicDiscoveryResponse.from_c(event)
-    elif event.header.evt_id == GattcEvtDescriptorDiscoveryResponse.evt_id:         return GattcEvtDescriptorDiscoveryResponse.from_c(event)
+            GattcEvtReadResponse,
+            GattcEvtHvx,
+            GattcEvtWriteResponse,
+            GattcEvtPrimaryServicecDiscoveryResponse,
+            GattcEvtCharacteristicDiscoveryResponse,
+            GattcEvtDescriptorDiscoveryResponse
+            ]
+
+    for event_class in event_classes:
+        if ble_event.header.evt_id == event_class.evt_id:
+            return event_class.from_c(ble_event)
 
