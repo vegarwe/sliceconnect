@@ -3,15 +3,18 @@ import sys
 import ctypes
 import os
 import platform
+import importlib
 
 logger  = logging.getLogger(__name__)
 
+driver = None
 
 # TODO: Make sure we only run this code once.
-
+from pc_ble_driver_py import config
+nrf_sd_ble_api_ver = config.sd_api_ver_get()
 # Load pc_ble_driver
-SWIG_MODULE_NAME = "pc_ble_driver"
-SHLIB_NAME = "pc_ble_driver_shared"
+SWIG_MODULE_NAME = "pc_ble_driver_sd_api_v{}".format(nrf_sd_ble_api_ver)
+SHLIB_NAME = "pc_ble_driver_shared_sd_api_v{}".format(nrf_sd_ble_api_ver)
 
 if getattr(sys, 'frozen', False):
     # we are running in a bundle
@@ -54,8 +57,10 @@ try:
 except Exception as error:
     raise RuntimeError("Could not load shared library {} : '{}'.".format(shlib_path, error))
 
-logger.info('Shared library folder: {}'.format(shlib_dir))
+logger.info('Shared library: {}'.format(shlib_path))
+logger.info('Swig module name: {}'.format(SWIG_MODULE_NAME))
 
 sys.path.append(shlib_dir)
-import pc_ble_driver as driver
+driver = importlib.import_module(SWIG_MODULE_NAME)
+
 import pc_ble_driver_py.ble_driver_types as util
