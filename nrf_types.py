@@ -260,13 +260,15 @@ class BLEGapAddr(object):
         addr, addr_flag = addr_string.split(',')
         addr_list = [int(i, 16) for i in addr.split(':')]
 
+        #print addr_string, addr_list[-1], addr_list[-1] & 0b11000000, 0b11000000
+        #print addr_string, addr_list[-1], addr_list[-1] & 0b10000000, 0b10000000
         if addr_flag in ['p', 'public']:
             addr_type = BLEGapAddr.Types.public
-        elif (addr_list[-1] & 0b11000000) == 0b00000000:
+        elif (addr_list[0] & 0b11000000) == 0b00000000:
             addr_type = BLEGapAddr.Types.random_private_non_resolvable
-        elif (addr_list[-1] & 0b11000000) == 0b01000000:
+        elif (addr_list[0] & 0b11000000) == 0b01000000:
             addr_type = BLEGapAddr.Types.random_private_resolvable
-        elif (addr_list[-1] & 0b11000000) == 0b11000000:
+        elif (addr_list[0] & 0b11000000) == 0b11000000:
             addr_type = BLEGapAddr.Types.random_static
         else:
             raise ValueError("Provided random address do not follow rules") # TODO: Improve error message
@@ -281,20 +283,20 @@ class BLEGapAddr(object):
         addr.addr       = addr_array.cast()
         return addr
 
-    #def get_addr_type_str(self):
-    #    if   self.addr_type == BLEGapAddr.Types.public:
-    #        return 'public'
-    #    elif self.addr_type == BLEGapAddr.Types.random_private_non_resolvable:
-    #        return 'nonres'
-    #    elif self.addr_type == BLEGapAddr.Types.random_private_resolvable:
-    #        return 'res'
-    #    elif self.addr_type == BLEGapAddr.Types.random_static:
-    #        return 'static'
-    #    else:
-    #        return 'err {0:02b}'.format((self.AddressLtlEnd[-1] >> 6) & 0b11)
+    def get_addr_type_str(self):
+        if   self.addr_type == BLEGapAddr.Types.public:
+            return 'public'
+        elif self.addr_type == BLEGapAddr.Types.random_private_non_resolvable:
+            return 'nonres'
+        elif self.addr_type == BLEGapAddr.Types.random_private_resolvable:
+            return 'res'
+        elif self.addr_type == BLEGapAddr.Types.random_static:
+            return 'static'
+        else:
+            return 'err {0:02b}'.format((self.AddressLtlEnd[-1] >> 6) & 0b11)
 
-    #def get_addr_str(self):
-    #    return '"%s" (% 6s)' % (self, self.get_addr_type_str())
+    def get_addr_str(self):
+        return '"%s" (% 6s)' % (self, self.get_addr_type_str())
 
     def __eq__(self, other):
         if not isinstance(other, BLEGapAddr):
@@ -623,7 +625,6 @@ class BLEGattcWriteParams(object):
 
 class BLEDescriptor(object):
     def __init__(self, uuid, handle):
-        logger.debug('New descriptor uuid: {}, handle: {}'.format(uuid, handle))
         self.handle = handle
         self.uuid   = uuid
 
@@ -636,7 +637,6 @@ class BLEDescriptor(object):
 
 class BLECharacteristic(object):
     def __init__(self, uuid, handle_decl, handle_value):
-        logger.debug('New characteristic uuid: {}, declaration handle: {}, value handle: {}'.format(uuid, handle_decl, handle_value))
         self.uuid           = uuid
         self.handle_decl    = handle_decl
         self.handle_value   = handle_value
@@ -653,7 +653,6 @@ class BLECharacteristic(object):
 
 class BLEService(object):
     def __init__(self, uuid, start_handle, end_handle):
-        logger.debug('New service uuid: {}, start handle: {}, end handle: {}'.format(uuid, start_handle, end_handle))
         self.uuid           = uuid
         self.start_handle   = start_handle
         self.end_handle     = end_handle
@@ -665,6 +664,7 @@ class BLEService(object):
                    start_handle = gattc_service.handle_range.start_handle,
                    end_handle   = gattc_service.handle_range.end_handle)
 
+    # TODO: What is this?
     def char_add(self, char):
         char.end_handle = self.end_handle
         self.chars.append(char)
