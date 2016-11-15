@@ -15,13 +15,15 @@ from ble_gattc          import GattClient
 
 
 ADDR_SHIELD = "FB:5E:B7:BD:EC:39,r"
-ADDR_BUILD  = 'DE:31:CD:FB:0B:57,r'
+ADDR_BUILD  = "DF:6A:43:8C:DD:80,r" # 'DE:31:CD:FB:0B:57,r'
 ADDR_BUILD2 = 'F5:1A:BE:53:2E:28,r'
-ADDR_WATCH  = "FE:E4:5D:E9:02:19,r"
+ADDR_WATCH  = "C6:15:B8:38:70:38,r"
+ADDR_WATCH2 = "FE:E4:5D:E9:02:19,r"
+ADDR_WATCH3 = ""
 ADDR_DEV    = "D6:60:C4:A9:6B:5F,r"
 
 def logger_setup():
-    logger = logging.getLogger('fjase')
+    logger = logging.getLogger() #'fjase')
     logger.setLevel(logging.DEBUG)
 
     sh = logging.StreamHandler()
@@ -94,7 +96,8 @@ class Slice(object):
                 raise NordicSemiException('Did not get GapEvtConnSecUpdate in time.')
             if not event.key_type == GapAuthKeyType.PASSKEY:
                 raise Exception("Unsupported auth key event")
-            passkey = '123456' # passkey = raw_input("pass key: ")
+            passkey = '123456'
+            passkey = raw_input("pass key: ")
             self.adapter.ble_gap_auth_key_reply(self.conn_handle, event.key_type, map(ord, passkey))
 
             event = evt_sync.get(timeout=32)
@@ -168,7 +171,7 @@ class Slice(object):
                     else:
                         continue
 
-                if isinstance(event, GattcEvtHvx):
+                if isinstance(event, GattcEvtHvx) and event.attr_handle == self.config_cp:
                     return event
 
     def version_get(self):
@@ -252,9 +255,9 @@ def main(args):
     #time.sleep(1)
     #slice_device.time((datetime.now() - datetime.utcfromtimestamp(0)).total_seconds())
     #time.sleep(1)
-    print slice_device.read_name()
+    #print slice_device.read_name()
     #slice_device.config_display_brightness(20)
-    slice_device.version_get()
+    #slice_device.version_get()
 
     #slice_device.dfu_goto_state()
     adapter.close()
