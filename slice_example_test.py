@@ -129,19 +129,60 @@ class Slice(BLEDevice, BLEDeviceObserver):
         else:
             self.pair()
             self.enable_services()
-        time.sleep(1)
 
     def on_connection_param_update_request(self, device, event):
         logger.info("Request to update connection parameters")
-        self.driver.ble_gap_conn_param_update(self.conn_handle, event.conn_params)
+        #self.driver.ble_gap_conn_param_update(self.conn_handle, event.conn_params)
 
     def read_name(self):
         return self.gattc.read(0x0003)
 
+
+    def enable_services(self):
+        with EventSync(self.driver, GattcEvtWriteResponse) as evt_sync:
+            self.gattc.write(self.sync_cp   + 1,   [1, 0])
+            evt_sync.get(timeout=.2)
+            self.gattc.write(self.sync_data + 1,   [1, 0])
+            evt_sync.get(timeout=.2)
+            self.gattc.write(self.config_cp + 1,   [1, 0])
+            evt_sync.get(timeout=.2)
+
+    def streaming_enable(self):
+        with EventSync(self.driver, GattcEvtWriteResponse) as evt_sync:
+            self.gattc.write(self.stream_cp + 1,   [1, 0])
+            print evt_sync.get(timeout=.2)
+
     def dfu_goto_state(self):
         self.gattc.write(self.dfu_cp + 1,     [1, 0])
-        time.sleep(.1)
         self.gattc.write(self.dfu_cp, [1])
+
+    def version_get(self):
+        event = self._config_write([0x01, 0xFD])
+        if not event:
+            return
+        data = event.data
+        if len(data) >= 11 and data[2] == 1:
+            fwid = data[3] + (data[4] << 8)
+            print "Softdevice FWID:    0x%04x: %s"                  % (fwid, nrf_sd_fwid.get(fwid, ''))
+            print 'Bootloader version: %02d.%02d.%02d.rc%02d'       % (data[ 8],   data[ 7],         data[ 6],          data[ 5])
+            print 'App version:        %02d.%02d.%02d.rc%02d.%0.7x' % (data[12],   data[11],         data[10],          data[ 9],
+                                                                       data[13] + (data[14] << 8) + (data[15] << 16) + (data[16] << 24))
+    def battery_level_get(self):
+        print self.gattc.read(0x0016).data[0]
+
+    def _config_cmd_status(self, event):
+        config_service_ctrl_responses = {
+                0x01: 'SUCCESS',
+                0x02: 'INVALID_STATE',
+                0x03: 'NOT_SUPPORTED',
+                0x04: 'DATA_SIZE',
+                0x05: 'OPER_FAILED',
+                0x06: 'PARAM_ERROR',
+                0x07: 'REJECTED',
+                0x08: 'NOT_FOUND',
+                0x09: 'NO_MEM'}
+        err_code = event.data[2]
+        return err_code == 1, config_service_ctrl_responses.get(err_code, '')
 
     def _config_write(self, cmd):
         with EventSync(self.driver, [GattcEvtWriteResponse, GattcEvtHvx]) as evt_sync:
@@ -167,32 +208,6 @@ class Slice(BLEDevice, BLEDeviceObserver):
                 if isinstance(event, GattcEvtHvx) and event.attr_handle == self.config_cp:
                     return event
 
-    def version_get(self):
-        event = self._config_write([0x01, 0xFD])
-        if not event:
-            return
-        data = event.data
-        if len(data) >= 11 and data[2] == 1:
-            fwid = data[3] + (data[4] << 8)
-            print "Softdevice FWID:    0x%04x: %s"                  % (fwid, nrf_sd_fwid.get(fwid, ''))
-            print 'Bootloader version: %02d.%02d.%02d.rc%02d'       % (data[ 8],   data[ 7],         data[ 6],          data[ 5])
-            print 'App version:        %02d.%02d.%02d.rc%02d.%0.7x' % (data[12],   data[11],         data[10],          data[ 9],
-                                                                       data[13] + (data[14] << 8) + (data[15] << 16) + (data[16] << 24))
-
-    def enable_services(self):
-        with EventSync(self.driver, GattcEvtWriteResponse) as evt_sync:
-            self.gattc.write(self.sync_cp   + 1,   [1, 0])
-            evt_sync.get(timeout=.2)
-            self.gattc.write(self.sync_data + 1,   [1, 0])
-            evt_sync.get(timeout=.2)
-            self.gattc.write(self.config_cp + 1,   [1, 0])
-            evt_sync.get(timeout=.2)
-
-    def streaming_enable(self):
-        with EventSync(self.driver, GattcEvtWriteResponse) as evt_sync:
-            self.gattc.write(self.stream_cp + 1,   [1, 0])
-            print evt_sync.get(timeout=.2)
-
     def config_wrist_action(self, on=True):
         #self.gattc.write(self.config_cp, [0x11, 0x00, 1 if on else 0])
         self._config_write([0x11, 0x00, 1 if on else 0])
@@ -207,29 +222,33 @@ class Slice(BLEDevice, BLEDeviceObserver):
         #    30, # current max
         #    ])
 
-    #def config_display_brightness(self, brightness=80):
-    #    if brightness < 7:
-    #        brightness = 7
-    #    if brightness > 100:
-    #        brightness = 100
-    #    self.adapter.write_attr(self.config_cp, [0x10, 0x00, brightness])
-    #    time.sleep(.1)
+    def config_display_brightness(self, brightness=80):
+        if brightness < 7:
+            brightness = 7
+        if brightness > 100:
+            brightness = 100
+        event = self._config_write([0x10, 0x00, brightness])
+        success, status = self._config_cmd_status(event)
+        if not success:
+            logger.error("Failed to set time, returned %s", status)
+            return
 
-    #def time(self, timestamp=None):
-    #    config_cmd = [0x01, 0xF0]
-    #    if timestamp:
-    #        config_cmd.extend(_get_time(timestamp))
-    #        print 'setting time', datetime.fromtimestamp(timestamp), timestamp
+    def config_time(self, timestamp=None):
+        config_cmd = [0x01, 0xF0]
+        if timestamp:
+            config_cmd.extend(_get_time(timestamp))
 
-    #    self.adapter.write_attr(0x003a, config_cmd)
-    #    #with Blipp(self.hcidev, Att.AttHandleValueNotification) as blipp:
-    #    #    self.le_device.gattc.write(self.config_cp, config_cmd)
-    #    #    retval = blipp.Wait(1)
-    #    #    if len(retval) == 6 and retval[5] == 1:
-    #    #        self.log.info("Time set")
-    #    #    elif len(retval) > 6 and retval[5] == 1:
-    #    #        timestamp = _le_to_int(retval[ 6:10])
-    #    #        print 'current_time', datetime.utcfromtimestamp(timestamp), timestamp
+        event = self._config_write(config_cmd)
+        success, status = self._config_cmd_status(event)
+        if not success:
+            logger.error("Failed to set time, returned %s", status)
+            return
+
+        if len(event.data) == 3:
+            logger.info('Time set %s (%s)', datetime.fromtimestamp(timestamp), timestamp)
+        elif len(event.data) >= 7:
+            timestamp = _le_to_int(event.data[3:7])
+            logger.info('Time on slice %s (%s)', datetime.utcfromtimestamp(timestamp), timestamp)
 
 
 def main(args):
@@ -253,15 +272,12 @@ def main(args):
     slice_device.auth()
 
     #slice_device.gattc.service_discovery()
-    #time.sleep(1)
-    #slice_device.time((datetime.now() - datetime.utcfromtimestamp(0)).total_seconds())
-    #time.sleep(1)
+    slice_device.config_time((datetime.now() - datetime.utcfromtimestamp(0)).total_seconds())
+    slice_device.config_time()
     print slice_device.read_name()
-    #slice_device.config_display_brightness(20)
+    slice_device.config_display_brightness(20)
     slice_device.version_get()
-
-
-    time.sleep(12)
+    slice_device.battery_level_get()
 
     #slice_device.dfu_goto_state()
     adapter.close()
