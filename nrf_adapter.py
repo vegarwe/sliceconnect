@@ -36,9 +36,7 @@
 #
 
 import logging
-import wrapt
 import Queue
-from threading      import Lock
 
 from nrf_event      import *
 from nrf_driver     import NrfDriverObserver, NrfDriver
@@ -52,7 +50,6 @@ class NrfAdapterObserver(object):
         pass
 
 class NrfAdapter(NrfDriverObserver):
-    observer_lock = Lock()
 
     def __init__(self, driver):
         super(NrfAdapter, self).__init__()
@@ -61,16 +58,8 @@ class NrfAdapter(NrfDriverObserver):
         self.driver         = driver
         self.driver.observer_register(self)
 
-        # Do poor mans inheritance TODO: Remove
-        self.ble_gap_scan_start         = self.driver.ble_gap_scan_start
-        self.ble_gap_scan_stop          = self.driver.ble_gap_scan_stop
-        self.ble_gap_connect            = self.driver.ble_gap_connect
-        self.ble_gap_encrypt            = self.driver.ble_gap_encrypt
-        self.ble_gap_sec_params_reply   = self.driver.ble_gap_sec_params_reply
-        self.ble_gap_auth_key_reply     = self.driver.ble_gap_auth_key_reply
-        self.ble_gattc_read             = self.driver.ble_gattc_read
-        self.ble_gattc_write            = self.driver.ble_gattc_write
-
+    def __del__(self):
+        self.driver.observer_unregister(self)
 
     @classmethod
     def open_serial(cls, serial_port, baud_rate):
@@ -91,6 +80,12 @@ class NrfAdapter(NrfDriverObserver):
         self.driver.observer_unregister(self)
         self.driver.close()
 
+    def scan_start(self, **kwargs):
+        return self.driver.ble_gap_scan_start(**kwargs)
+
+    def scan_stop(self, **kwargs):
+        return self.driver.ble_gap_scan_stop(**kwargs)
+
     def on_event(self, nrf_driver, event):
         if   isinstance(event, GapEvtConnected):
             self.conn_handles.append(event.conn_handle)
@@ -103,16 +98,12 @@ class NrfAdapter(NrfDriverObserver):
             # TODO: Maintain list of seen devices
             self._on_gap_evt_adv_report(nrf_driver, event)
 
-    @wrapt.synchronized(observer_lock)
     def observer_register(self, observer):
         self.observers.append(observer)
 
-
-    @wrapt.synchronized(observer_lock)
     def observer_unregister(self, observer):
         self.observers.remove(observer)
 
-    @wrapt.synchronized(observer_lock)
     def _on_gap_evt_adv_report(self, nrf_driver, event):
-        for obs in self.observers:
+        for obs in self.observers[:]:
             obs.on_gap_evt_adv_report(self, event)

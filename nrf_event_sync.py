@@ -70,7 +70,10 @@ class EventSync(NrfDriverObserver):
         self._queue.put(event)
 
     def get(self, block=True, timeout=1):
-        return self._queue.get(block, timeout)
+        try:
+            return self._queue.get(block, timeout)
+        except Queue.Empty:
+            pass
 
     # TODO: Needs more testing!!!!
     def get_specific(self, event_type=None, block=True, timeout=None):

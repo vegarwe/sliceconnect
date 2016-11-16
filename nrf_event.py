@@ -128,6 +128,22 @@ class GapEvtConnParamUpdateRequest(GapEvt):
     def __repr__(self):
         return "%s(conn_handle=%r, conn_params=%r)" % (self.conn_handle, self.conn_params)
 
+class GapEvtConnParamUpdate(GapEvt):
+    evt_id = driver.BLE_GAP_EVT_CONN_PARAM_UPDATE
+
+    def __init__(self, conn_handle, conn_params):
+        super(GapEvtConnParamUpdate, self).__init__(conn_handle)
+        self.conn_params = conn_params
+
+    @classmethod
+    def from_c(cls, event):
+        conn_params = event.evt.gap_evt.params.conn_param_update.conn_params
+        return cls(conn_handle  = event.evt.gap_evt.conn_handle,
+                   conn_params  = BLEGapConnParams.from_c(conn_params))
+
+    def __repr__(self):
+        return "%s(conn_handle=%r, conn_params=%r)" % (self.conn_handle, self.conn_params)
+
 
 class GapEvtConnected(GapEvt):
     evt_id = driver.BLE_GAP_EVT_CONNECTED
@@ -454,6 +470,7 @@ def event_decode(ble_event):
             GapEvtTimeout,
 
             GapEvtConnParamUpdateRequest,
+            GapEvtConnParamUpdate,
 
             # SMP
             GapEvtSecParamsRequest,

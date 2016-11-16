@@ -11,12 +11,13 @@ from nrf_dll_load       import util
 from pc_ble_driver_py.exceptions import NordicSemiException
 
 import bond_store
+from ble_device         import BLEDevice, BLEDeviceObserver
+from ble_gattc          import GattClient
 from nrf_adapter        import NrfAdapter, NrfAdapterObserver
 from nrf_event          import *
 from nrf_event_sync     import EventSync
 from nrf_serial_no      import nrf_sd_fwid
 from nrf_types          import *
-from ble_gattc          import GattClient
 
 
 ADDR_SHIELD = "FB:5E:B7:BD:EC:39,r"
@@ -52,7 +53,7 @@ def _get_time(time_stamp = None):
         time_stamp = int(time_stamp) # Make sure we drop second fractions
     return _int_to_le(time_stamp)
 
-class Slice(object):
+class Slice(BLEDevice, BLEDeviceObserver):
     dfu_cp      = 0x0027
     stream_cp   = 0x002b
     sync_cp     = 0x0031
@@ -60,50 +61,35 @@ class Slice(object):
     config_cp   = 0x003a
 
     def __init__(self, driver, peer_addr):
-        self.driver         = driver
-        self.peer_addr      = peer_addr
+        BLEDevice.__init__(self, driver, peer_addr)
+        BLEDeviceObserver.__init__(self)
 
-        self.conn_handle    = None
-        self.own_addr       = None
-        self.gattc          = None
+        self.observer_register(self)
 
     def connect(self):
         logger.info('BLE: Connecting...')
-        with EventSync(self.driver, GapEvtConnected) as evt_sync:
-            conn_params = BLEGapConnParams(min_conn_interval_ms = 15,
-                                           max_conn_interval_ms = 30,
-                                           conn_sup_timeout_ms  = 4000,
-                                           slave_latency        = 0)
-            self.driver.ble_gap_connect(self.peer_addr, conn_params=conn_params)
+        super(Slice, self).connect()
+        if not self.connected.wait(2):
+            raise NordicSemiException('Timeout. Device not found.')
 
-            event = evt_sync.get(timeout=2)
-            if not event:
-                raise NordicSemiException('Timeout. Device not found.')
-
-            self.conn_handle    = event.conn_handle
-            self.peer_addr      = event.peer_addr
-            self.own_addr       = event.own_addr
-
-        self.gattc = GattClient(self.driver, self.conn_handle)
-
-    def _pair(self):
+    def pair(self):
         with EventSync(self.driver, [GapEvtSec]) as evt_sync:
             self.gattc.gap_authenticate(io_caps = GapIoCaps.KEYBOARD_DISPLAY)
 
             event = evt_sync.get(timeout=32)
             if not isinstance(event, GapEvtSecParamsRequest):
                 raise NordicSemiException('Did not get GapEvtSecParamsRequest in time.')
-            key_set = BLEGapSecKeyset()
-            self.driver.ble_gap_sec_params_reply(self.conn_handle, BLEGapSecStatus.success, None, key_set)
+            self.key_set = BLEGapSecKeyset()
+            self.driver.ble_gap_sec_params_reply(self.conn_handle, BLEGapSecStatus.success, None, self.key_set)
 
             event = evt_sync.get(timeout=32)
             if not isinstance(event, GapEvtAuthKeyRequest):
                 raise NordicSemiException('Did not get GapEvtConnSecUpdate in time.')
             if not event.key_type == GapAuthKeyType.PASSKEY:
                 raise Exception("Unsupported auth key event")
-            passkey = '123456'
-            passkey = raw_input("pass key: ")
-            self.driver.ble_gap_auth_key_reply(self.conn_handle, event.key_type, map(ord, passkey))
+
+            pass_key = raw_input("pass key: ")
+            self.driver.ble_gap_auth_key_reply(self.conn_handle, event.key_type, map(ord, pass_key))
 
             event = evt_sync.get(timeout=32)
             if not isinstance(event, GapEvtConnSecUpdate):
@@ -114,34 +100,40 @@ class Slice(object):
 
             # TODO: Move knowledge of sec_keyset structure
             bond_store.store_bond(self.own_addr, self.peer_addr,
-                    key_set.sec_keyset.keys_peer.p_enc_key.master_id.ediv,
-                    util.uint8_array_to_list(key_set.sec_keyset.keys_peer.p_enc_key.master_id.rand, 8),
-                    util.uint8_array_to_list(key_set.sec_keyset.keys_peer.p_enc_key.enc_info.ltk,
-                            key_set.sec_keyset.keys_peer.p_enc_key.enc_info.ltk_len),
-                    key_set.sec_keyset.keys_peer.p_enc_key.enc_info.lesc,
-                    key_set.sec_keyset.keys_peer.p_enc_key.enc_info.auth)
+                    self.key_set.sec_keyset.keys_peer.p_enc_key.master_id.ediv,
+                    util.uint8_array_to_list(self.key_set.sec_keyset.keys_peer.p_enc_key.master_id.rand, 8),
+                    util.uint8_array_to_list(self.key_set.sec_keyset.keys_peer.p_enc_key.enc_info.ltk,
+                            self.key_set.sec_keyset.keys_peer.p_enc_key.enc_info.ltk_len),
+                    self.key_set.sec_keyset.keys_peer.p_enc_key.enc_info.lesc,
+                    self.key_set.sec_keyset.keys_peer.p_enc_key.enc_info.auth)
 
-            return key_set
-
-    def _encrypt(self, bond):
+    def encrypt(self, bond):
         with EventSync(self.driver, [GapEvtSec, GapEvtDisconnected]) as evt_sync:
             self.driver.ble_gap_encrypt(self.conn_handle, bond.ediv, bond.rand, bond.ltk, bond.lesc, bond.auth)
             event =  evt_sync.get(timeout=32)
             if   isinstance(event, GapEvtConnSecUpdate):
-                if event.sec_mode == 1 and event.sec_level == 1:
+                if event and event.sec_mode == 1 and event.sec_level == 1:
+                    # Delete bond if encryption failed
+                    # Useful for a debugging tool, not great for production
                     logger.info("Enc failed, deleting bond")
                     bond_store.delete(str(bond.peer_addr))
             elif isinstance(event, GapEvtDisconnected):
-                raise NordicSemiException('encryption failed.')
+                raise NordicSemiException('Link disconnected')
+            else:
+                raise NordicSemiException('Got unexpected event %r' % event)
 
-    def authenticate(self):
+    def auth(self):
         bond = bond_store.get_bond(self.peer_addr)
         if bond:
-            self._encrypt(bond)
+            self.encrypt(bond)
         else:
-            key_set = self._pair()
+            self.pair()
             self.enable_services()
         time.sleep(1)
+
+    def on_connection_param_update_request(self, device, event):
+        logger.info("Request to update connection parameters")
+        self.driver.ble_gap_conn_param_update(self.conn_handle, event.conn_params)
 
     def read_name(self):
         return self.gattc.read(0x0003)
@@ -150,10 +142,6 @@ class Slice(object):
         self.gattc.write(self.dfu_cp + 1,     [1, 0])
         time.sleep(.1)
         self.gattc.write(self.dfu_cp, [1])
-
-    def version_get(self):
-        with EventSync(self.driver, [GattcEvtWriteResponse, GattcEvtHvx]) as evt_sync:
-            self.gattc.write(self.config_cp, [0x01, 0xFD])
 
     def _config_write(self, cmd):
         with EventSync(self.driver, [GattcEvtWriteResponse, GattcEvtHvx]) as evt_sync:
@@ -189,21 +177,25 @@ class Slice(object):
             print "Softdevice FWID:    0x%04x: %s"                  % (fwid, nrf_sd_fwid.get(fwid, ''))
             print 'Bootloader version: %02d.%02d.%02d.rc%02d'       % (data[ 8],   data[ 7],         data[ 6],          data[ 5])
             print 'App version:        %02d.%02d.%02d.rc%02d.%0.7x' % (data[12],   data[11],         data[10],          data[ 9],
-                                                                           data[13] + (data[14] << 8) + (data[15] << 16) + (data[16] << 24))
+                                                                       data[13] + (data[14] << 8) + (data[15] << 16) + (data[16] << 24))
 
     def enable_services(self):
-        self.gattc.write(self.sync_cp   + 1,   [1, 0])
-        time.sleep(.1)
-        self.gattc.write(self.sync_data + 1,   [1, 0])
-        time.sleep(.1)
-        self.gattc.write(self.config_cp + 1,   [1, 0])
-        time.sleep(.1)
+        with EventSync(self.driver, GattcEvtWriteResponse) as evt_sync:
+            self.gattc.write(self.sync_cp   + 1,   [1, 0])
+            evt_sync.get(timeout=.2)
+            self.gattc.write(self.sync_data + 1,   [1, 0])
+            evt_sync.get(timeout=.2)
+            self.gattc.write(self.config_cp + 1,   [1, 0])
+            evt_sync.get(timeout=.2)
 
     def streaming_enable(self):
-        self.gattc.write(self.stream_cp + 1,   [1, 0])
+        with EventSync(self.driver, GattcEvtWriteResponse) as evt_sync:
+            self.gattc.write(self.stream_cp + 1,   [1, 0])
+            print evt_sync.get(timeout=.2)
 
     def config_wrist_action(self, on=True):
-        self.gattc.write(self.config_cp, [0x11, 0x00, 1 if on else 0])
+        #self.gattc.write(self.config_cp, [0x11, 0x00, 1 if on else 0])
+        self._config_write([0x11, 0x00, 1 if on else 0])
 
     def config_afe_current(self, current=25, led_mode=0):
         pass
@@ -250,15 +242,15 @@ def main(args):
 
     adv_observer = AdvObserver()
     adapter.observer_register(adv_observer)
-    adapter.ble_gap_scan_start()
+    adapter.scan_start()
     time.sleep(.1)
-    adapter.ble_gap_scan_stop()
+    adapter.scan_stop()
     adapter.observer_unregister(adv_observer)
 
     # Connect to device
-    slice_device = Slice(adapter.driver, BLEGapAddr.from_string(ADDR_WATCH2))
+    slice_device = Slice(adapter.driver, BLEGapAddr.from_string(ADDR_DEV))
     slice_device.connect()
-    slice_device.authenticate()
+    slice_device.auth()
 
     #slice_device.gattc.service_discovery()
     #time.sleep(1)
@@ -266,7 +258,10 @@ def main(args):
     #time.sleep(1)
     print slice_device.read_name()
     #slice_device.config_display_brightness(20)
-    #slice_device.version_get()
+    slice_device.version_get()
+
+
+    time.sleep(12)
 
     #slice_device.dfu_goto_state()
     adapter.close()

@@ -45,6 +45,9 @@ from nrf_event_sync     import EventSync
 logger = logging.getLogger(__name__)
 
 
+# TODO:
+# * Should client use EventSync or be fully interrupt driven?
+
 class GattClient(NrfDriverObserver):
 
     def __init__(self, driver, conn_handle):
@@ -52,6 +55,9 @@ class GattClient(NrfDriverObserver):
         self.conn_handle    = conn_handle
         self.driver         = driver
         self.driver.observer_register(self)
+
+    def __del__(self):
+        self.driver.observer_unregister(self)
 
     def gap_authenticate(self, bond=True, mitm=True, le_sec_pairing=False, keypress_noti=False, io_caps=None,
                          oob=False, min_key_size=16, max_key_size=16, kdist_own=None, kdist_peer=None):
@@ -150,7 +156,6 @@ class GattClient(NrfDriverObserver):
                                                             char.end_handle)
 
     def on_event(self, nrf_driver, event):
-        pass
         if   isinstance(event, GapEvtConnected):
             pass #    self.conn_handles.append(event.conn_handle)
         elif isinstance(event, GapEvtDisconnected):

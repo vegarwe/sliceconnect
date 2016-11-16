@@ -65,7 +65,6 @@ class NrfDriverObserver(object):
         pass
 
 class NrfDriver(object):
-    observer_lock   = Lock()
     api_lock        = Lock()
 
     def __init__(self, serial_port, baud_rate=115200, auto_flash=False):
@@ -131,12 +130,10 @@ class NrfDriver(object):
         return driver.sd_rpc_close(self.rpc_adapter)
 
 
-    @wrapt.synchronized(observer_lock)
     def observer_register(self, observer):
         self.observers.append(observer)
 
 
-    @wrapt.synchronized(observer_lock)
     def observer_unregister(self, observer):
         self.observers.remove(observer)
 
@@ -425,7 +422,6 @@ class NrfDriver(object):
         except Exception as e:
             logger.exception("Event handling failed")
 
-    @wrapt.synchronized(observer_lock)
     def _sync_evt_handler(self, adapter, ble_event):
         #logger.info('ble_event %r', ble_event.header.evt_id)
 
@@ -437,5 +433,5 @@ class NrfDriver(object):
             logger.warn('unknown ble_event %r (discarded)', ble_event.header.evt_id)
             return
 
-        for obs in self.observers:
+        for obs in self.observers[:]:
             obs.on_event(self, event)
