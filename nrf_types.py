@@ -358,6 +358,12 @@ class BLEGapAddr(object):
             other = BLEGapAddr.from_string(str(other))
         return str(self) == str(other)
 
+    def __ne__(self, other):
+        return not self == other
+
+    def __hash__(self):
+        return str(self)
+
     def get_addr_flag(self):
         return 'p' if self.addr_type == BLEGapAddr.Types.public else 'r'
 
