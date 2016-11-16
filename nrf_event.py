@@ -45,7 +45,7 @@ class BLEEvent(object):
     evt_id = None
 
     def __init__(self, conn_handle):
-        self.conn_handle = conn_handle # TODO: Does all events have conn_handle? Nooooo?...
+        self.conn_handle = conn_handle
 
 class EvtTxComplete(BLEEvent):
     evt_id = driver.BLE_EVT_TX_COMPLETE
@@ -126,7 +126,8 @@ class GapEvtConnParamUpdateRequest(GapEvt):
                    conn_params  = BLEGapConnParams.from_c(conn_params))
 
     def __repr__(self):
-        return "%s(conn_handle=%r, conn_params=%r)" % (self.conn_handle, self.conn_params)
+        return "%s(conn_handle=%r, conn_params=%r)" % (
+                self.__class__.__name__, self.conn_handle, self.conn_params)
 
 class GapEvtConnParamUpdate(GapEvt):
     evt_id = driver.BLE_GAP_EVT_CONN_PARAM_UPDATE
@@ -142,7 +143,8 @@ class GapEvtConnParamUpdate(GapEvt):
                    conn_params  = BLEGapConnParams.from_c(conn_params))
 
     def __repr__(self):
-        return "%s(conn_handle=%r, conn_params=%r)" % (self.conn_handle, self.conn_params)
+        return "%s(conn_handle=%r, conn_params=%r)" % (
+                self.__class__.__name__, self.conn_handle, self.conn_params)
 
 
 class GapEvtConnected(GapEvt):

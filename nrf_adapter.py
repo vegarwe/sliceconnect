@@ -58,9 +58,6 @@ class NrfAdapter(NrfDriverObserver):
         self.driver         = driver
         self.driver.observer_register(self)
 
-    def __del__(self):
-        self.driver.observer_unregister(self)
-
     @classmethod
     def open_serial(cls, serial_port, baud_rate):
         adapter = cls(NrfDriver(serial_port=serial_port, baud_rate=baud_rate))
