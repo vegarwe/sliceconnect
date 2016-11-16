@@ -276,7 +276,7 @@ class NrfDriver(object):
         assert isinstance(sec_keyset, BLEGapSecKeyset), 'Invalid argument type'
         return driver.sd_ble_gap_sec_params_reply(self.rpc_adapter,
                 conn_handle,
-                sec_status,
+                sec_status.value,
                 sec_params if sec_params else None,
                 sec_keyset.to_c())
 
@@ -427,7 +427,7 @@ class NrfDriver(object):
 
     @wrapt.synchronized(observer_lock)
     def _sync_evt_handler(self, adapter, ble_event):
-        #logger.info('event %r', event.header.evt_id)
+        #logger.info('ble_event %r', ble_event.header.evt_id)
 
         if len(self.observers) == 0:
             return

@@ -47,11 +47,10 @@ logger = logging.getLogger(__name__)
 
 class GattClient(NrfDriverObserver):
 
-    def __init__(self, adapter, conn_handle):
+    def __init__(self, driver, conn_handle):
         super(GattClient, self).__init__()
         self.conn_handle    = conn_handle
-        self.adapter        = adapter
-        self.driver         = adapter.driver
+        self.driver         = driver
         self.driver.observer_register(self)
 
     def gap_authenticate(self, bond=True, mitm=True, le_sec_pairing=False, keypress_noti=False, io_caps=None,
@@ -76,8 +75,8 @@ class GattClient(NrfDriverObserver):
         self.driver.ble_gap_authenticate(self.conn_handle, sec_params)
 
     def read(self, attr_handle):
-        with EventSync(self.adapter, [GattcEvtReadResponse]) as evt_sync:
-            self.adapter.ble_gattc_read(self.conn_handle, attr_handle)
+        with EventSync(self.driver, [GattcEvtReadResponse]) as evt_sync:
+            self.driver.ble_gattc_read(self.conn_handle, attr_handle)
             return evt_sync.get()
 
     def write(self, attr_handle, value, offset=0):
@@ -86,14 +85,14 @@ class GattClient(NrfDriverObserver):
                                            attr_handle,
                                            value,
                                            offset)
-        self.adapter.ble_gattc_write(self.conn_handle, write_params)
+        self.driver.ble_gattc_write(self.conn_handle, write_params)
         # TODO: Wait for HCI_NUM_COMPLETE or WRITE_RESPONSE?
 
     def service_discovery(self, uuid=None):
         classes = [GattcEvtReadResponse,
                    GattcEvtCharacteristicDiscoveryResponse,
                    GattcEvtDescriptorDiscoveryResponse]
-        with EventSync(self.adapter, GattcEvtPrimaryServicecDiscoveryResponse) as evt_sync:
+        with EventSync(self.driver, GattcEvtPrimaryServicecDiscoveryResponse) as evt_sync:
             self.driver.ble_gattc_prim_srvc_disc(self.conn_handle, uuid, 0x0001)
             services = []
             while True:
@@ -114,7 +113,7 @@ class GattClient(NrfDriverObserver):
         classes = [GattcEvtReadResponse,
                    GattcEvtCharacteristicDiscoveryResponse,
                    GattcEvtDescriptorDiscoveryResponse]
-        with EventSync(self.adapter, classes) as evt_sync:
+        with EventSync(self.driver, classes) as evt_sync:
             for service in services:
                 self.driver.ble_gattc_char_disc(self.conn_handle, service.start_handle, service.end_handle)
                 while True:

@@ -42,9 +42,9 @@ from nrf_driver     import NrfDriverObserver
 
 
 class EventSync(NrfDriverObserver):
-    def __init__(self, adapter, event_filter=None, callback=None):
+    def __init__(self, driver, event_filter=None, callback=None):
         super(NrfDriverObserver, self).__init__()
-        self._driver        = adapter.driver
+        self.driver        = driver
         if isinstance(event_filter, (list, tuple)):
             self._events    = event_filter
         elif event_filter is not None:
@@ -91,10 +91,10 @@ class EventSync(NrfDriverObserver):
                     return None
 
     def register_as_observer(self):
-        self._driver.observer_register(self)
+        self.driver.observer_register(self)
 
     def unregister_as_observer(self):
-        self._driver.observer_unregister(self)
+        self.driver.observer_unregister(self)
 
     def __enter__(self):
         self.register_as_observer()

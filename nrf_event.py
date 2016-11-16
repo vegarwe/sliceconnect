@@ -211,6 +211,7 @@ class GapEvtSecParamsRequest(GapEvtSec):
     def __repr__(self):
         return "%s(conn_handle=%r, sec_params=%r)" % ( self.__class__.__name__, self.conn_handle, self.sec_params)
 
+# TODO: Move to nrf_types, merge with BLEGapIOCaps
 class GapIoCaps(IntEnum):
     DISPLAY_ONLY        = driver.BLE_GAP_IO_CAPS_DISPLAY_ONLY
     DISPLAY_YESNO       = driver.BLE_GAP_IO_CAPS_DISPLAY_YESNO

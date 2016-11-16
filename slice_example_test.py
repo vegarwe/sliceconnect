@@ -11,7 +11,7 @@ from nrf_dll_load       import util
 from pc_ble_driver_py.exceptions import NordicSemiException
 
 import bond_store
-from nrf_adapter        import NrfAdapter
+from nrf_adapter        import NrfAdapter, NrfAdapterObserver
 from nrf_event          import *
 from nrf_event_sync     import EventSync
 from nrf_serial_no      import nrf_sd_fwid
@@ -59,8 +59,8 @@ class Slice(object):
     sync_data   = 0x0034
     config_cp   = 0x003a
 
-    def __init__(self, adapter, peer_addr):
-        self.adapter        = adapter
+    def __init__(self, driver, peer_addr):
+        self.driver         = driver
         self.peer_addr      = peer_addr
 
         self.conn_handle    = None
@@ -69,12 +69,12 @@ class Slice(object):
 
     def connect(self):
         logger.info('BLE: Connecting...')
-        with EventSync(self.adapter, GapEvtConnected) as evt_sync:
+        with EventSync(self.driver, GapEvtConnected) as evt_sync:
             conn_params = BLEGapConnParams(min_conn_interval_ms = 15,
                                            max_conn_interval_ms = 30,
                                            conn_sup_timeout_ms  = 4000,
                                            slave_latency        = 0)
-            self.adapter.ble_gap_connect(self.peer_addr, conn_params=conn_params)
+            self.driver.ble_gap_connect(self.peer_addr, conn_params=conn_params)
 
             event = evt_sync.get(timeout=2)
             if not event:
@@ -84,17 +84,17 @@ class Slice(object):
             self.peer_addr      = event.peer_addr
             self.own_addr       = event.own_addr
 
-        self.gattc = GattClient(self.adapter, self.conn_handle)
+        self.gattc = GattClient(self.driver, self.conn_handle)
 
     def _pair(self):
-        with EventSync(self.adapter, [GapEvtSec]) as evt_sync:
+        with EventSync(self.driver, [GapEvtSec]) as evt_sync:
             self.gattc.gap_authenticate(io_caps = GapIoCaps.KEYBOARD_DISPLAY)
 
             event = evt_sync.get(timeout=32)
             if not isinstance(event, GapEvtSecParamsRequest):
                 raise NordicSemiException('Did not get GapEvtSecParamsRequest in time.')
             key_set = BLEGapSecKeyset()
-            self.adapter.ble_gap_sec_params_reply(self.conn_handle, 0, None, key_set)
+            self.driver.ble_gap_sec_params_reply(self.conn_handle, BLEGapSecStatus.success, None, key_set)
 
             event = evt_sync.get(timeout=32)
             if not isinstance(event, GapEvtAuthKeyRequest):
@@ -103,7 +103,7 @@ class Slice(object):
                 raise Exception("Unsupported auth key event")
             passkey = '123456'
             passkey = raw_input("pass key: ")
-            self.adapter.ble_gap_auth_key_reply(self.conn_handle, event.key_type, map(ord, passkey))
+            self.driver.ble_gap_auth_key_reply(self.conn_handle, event.key_type, map(ord, passkey))
 
             event = evt_sync.get(timeout=32)
             if not isinstance(event, GapEvtConnSecUpdate):
@@ -124,8 +124,8 @@ class Slice(object):
             return key_set
 
     def _encrypt(self, bond):
-        with EventSync(self.adapter, [GapEvtSec, GapEvtDisconnected]) as evt_sync:
-            self.adapter.ble_gap_encrypt(self.conn_handle, bond.ediv, bond.rand, bond.ltk, bond.lesc, bond.auth)
+        with EventSync(self.driver, [GapEvtSec, GapEvtDisconnected]) as evt_sync:
+            self.driver.ble_gap_encrypt(self.conn_handle, bond.ediv, bond.rand, bond.ltk, bond.lesc, bond.auth)
             event =  evt_sync.get(timeout=32)
             if   isinstance(event, GapEvtConnSecUpdate):
                 if event.sec_mode == 1 and event.sec_level == 1:
@@ -152,11 +152,11 @@ class Slice(object):
         self.gattc.write(self.dfu_cp, [1])
 
     def version_get(self):
-        with EventSync(self.adapter, [GattcEvtWriteResponse, GattcEvtHvx]) as evt_sync:
+        with EventSync(self.driver, [GattcEvtWriteResponse, GattcEvtHvx]) as evt_sync:
             self.gattc.write(self.config_cp, [0x01, 0xFD])
 
     def _config_write(self, cmd):
-        with EventSync(self.adapter, [GattcEvtWriteResponse, GattcEvtHvx]) as evt_sync:
+        with EventSync(self.driver, [GattcEvtWriteResponse, GattcEvtHvx]) as evt_sync:
             self.gattc.write(self.config_cp, cmd)
 
             for _ in range(5): # Arbitrarly chosen a number to not loop for ever
@@ -215,52 +215,56 @@ class Slice(object):
         #    30, # current max
         #    ])
 
-    def config_display_brightness(self, brightness=80):
-        if brightness < 7:
-            brightness = 7
-        if brightness > 100:
-            brightness = 100
-        self.adapter.write_attr(self.config_cp, [0x10, 0x00, brightness])
-        time.sleep(.1)
+    #def config_display_brightness(self, brightness=80):
+    #    if brightness < 7:
+    #        brightness = 7
+    #    if brightness > 100:
+    #        brightness = 100
+    #    self.adapter.write_attr(self.config_cp, [0x10, 0x00, brightness])
+    #    time.sleep(.1)
 
-    def time(self, timestamp=None):
-        config_cmd = [0x01, 0xF0]
-        if timestamp:
-            config_cmd.extend(_get_time(timestamp))
-            print 'setting time', datetime.fromtimestamp(timestamp), timestamp
+    #def time(self, timestamp=None):
+    #    config_cmd = [0x01, 0xF0]
+    #    if timestamp:
+    #        config_cmd.extend(_get_time(timestamp))
+    #        print 'setting time', datetime.fromtimestamp(timestamp), timestamp
 
-        self.adapter.write_attr(0x003a, config_cmd)
-        #with Blipp(self.hcidev, Att.AttHandleValueNotification) as blipp:
-        #    self.le_device.gattc.write(self.config_cp, config_cmd)
-        #    retval = blipp.Wait(1)
-        #    if len(retval) == 6 and retval[5] == 1:
-        #        self.log.info("Time set")
-        #    elif len(retval) > 6 and retval[5] == 1:
-        #        timestamp = _le_to_int(retval[ 6:10])
-        #        print 'current_time', datetime.utcfromtimestamp(timestamp), timestamp
+    #    self.adapter.write_attr(0x003a, config_cmd)
+    #    #with Blipp(self.hcidev, Att.AttHandleValueNotification) as blipp:
+    #    #    self.le_device.gattc.write(self.config_cp, config_cmd)
+    #    #    retval = blipp.Wait(1)
+    #    #    if len(retval) == 6 and retval[5] == 1:
+    #    #        self.log.info("Time set")
+    #    #    elif len(retval) > 6 and retval[5] == 1:
+    #    #        timestamp = _le_to_int(retval[ 6:10])
+    #    #        print 'current_time', datetime.utcfromtimestamp(timestamp), timestamp
 
 
 def main(args):
     adapter = NrfAdapter.open_serial(serial_port=args.device, baud_rate=115200)
 
     # Scan for devices
-    def adv_callback(event):
-        print 'hello', repr(event)
-        return True
-    with EventSync(adapter, GapEvtAdvReport, callback=adv_callback) as evt_sync:
-        adapter.ble_gap_scan_start()
-        time.sleep(.5)
-        adapter.ble_gap_scan_stop()
+    class AdvObserver(NrfAdapterObserver):
+        def on_gap_evt_adv_report(self, adapter, event):
+            print repr(event)
 
-    slice_device = Slice(adapter, BLEGapAddr.from_string(ADDR_DEV))
+    adv_observer = AdvObserver()
+    adapter.observer_register(adv_observer)
+    adapter.ble_gap_scan_start()
+    time.sleep(.1)
+    adapter.ble_gap_scan_stop()
+    adapter.observer_unregister(adv_observer)
+
+    # Connect to device
+    slice_device = Slice(adapter.driver, BLEGapAddr.from_string(ADDR_WATCH2))
     slice_device.connect()
     slice_device.authenticate()
 
-    slice_device.gattc.service_discovery()
+    #slice_device.gattc.service_discovery()
     #time.sleep(1)
     #slice_device.time((datetime.now() - datetime.utcfromtimestamp(0)).total_seconds())
     #time.sleep(1)
-    #print slice_device.read_name()
+    print slice_device.read_name()
     #slice_device.config_display_brightness(20)
     #slice_device.version_get()
 

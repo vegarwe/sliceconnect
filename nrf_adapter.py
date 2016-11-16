@@ -36,24 +36,32 @@
 #
 
 import logging
+import wrapt
 import Queue
+from threading      import Lock
 
-from nrf_event import *
-from nrf_driver import NrfDriverObserver, NrfDriver
-from nrf_event_sync     import EventSync
+from nrf_event      import *
+from nrf_driver     import NrfDriverObserver, NrfDriver
+from nrf_event_sync import EventSync
 
 logger = logging.getLogger(__name__)
 
 
+class NrfAdapterObserver(object):
+    def on_gap_evt_adv_report(self, adapter, event):
+        pass
+
 class NrfAdapter(NrfDriverObserver):
+    observer_lock = Lock()
 
     def __init__(self, driver):
         super(NrfAdapter, self).__init__()
         self.conn_handles   = []
+        self.observers      = []
         self.driver         = driver
         self.driver.observer_register(self)
 
-        # Do poor mans inheritance
+        # Do poor mans inheritance TODO: Remove
         self.ble_gap_scan_start         = self.driver.ble_gap_scan_start
         self.ble_gap_scan_stop          = self.driver.ble_gap_scan_stop
         self.ble_gap_connect            = self.driver.ble_gap_connect
@@ -75,11 +83,11 @@ class NrfAdapter(NrfDriverObserver):
         self.driver.ble_enable()
 
     def close(self):
-        with EventSync(self, [GapEvtDisconnected]) as evt_sync:
+        with EventSync(self.driver, GapEvtDisconnected) as evt_sync:
             for conn_handle in self.conn_handles[:]:
                 logger.info('BLE: Disconnecting conn_handle %r', conn_handle)
                 self.driver.ble_gap_disconnect(conn_handle)
-                evt_sync.get(timeout=0.2) # TODO: If we know the conn_params we can be more informed about timeout
+                evt_sync.get(timeout=1.2) # TODO: If we know the conn_params we can be more informed about timeout
         self.driver.observer_unregister(self)
         self.driver.close()
 
@@ -92,4 +100,19 @@ class NrfAdapter(NrfDriverObserver):
             except ValueError:
                 pass
         elif isinstance(event, GapEvtAdvReport):
-            pass # TODO: Maintain list of seen devices
+            # TODO: Maintain list of seen devices
+            self._on_gap_evt_adv_report(nrf_driver, event)
+
+    @wrapt.synchronized(observer_lock)
+    def observer_register(self, observer):
+        self.observers.append(observer)
+
+
+    @wrapt.synchronized(observer_lock)
+    def observer_unregister(self, observer):
+        self.observers.remove(observer)
+
+    @wrapt.synchronized(observer_lock)
+    def _on_gap_evt_adv_report(self, nrf_driver, event):
+        for obs in self.observers:
+            obs.on_gap_evt_adv_report(self, event)

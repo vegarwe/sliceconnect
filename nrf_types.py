@@ -172,6 +172,24 @@ class BLEEnableParams(object):
 
         return ble_enable_params
 
+class BLEGapSecStatus(Enum):
+    success                 = driver.BLE_GAP_SEC_STATUS_SUCCESS
+    timeout                 = driver.BLE_GAP_SEC_STATUS_TIMEOUT
+    pdu_invalid             = driver.BLE_GAP_SEC_STATUS_PDU_INVALID
+    passkey_entry_failed    = driver.BLE_GAP_SEC_STATUS_PASSKEY_ENTRY_FAILED
+    oob_not_available       = driver.BLE_GAP_SEC_STATUS_OOB_NOT_AVAILABLE
+    auth_req                = driver.BLE_GAP_SEC_STATUS_AUTH_REQ
+    confirm_value           = driver.BLE_GAP_SEC_STATUS_CONFIRM_VALUE
+    pairing_not_supp        = driver.BLE_GAP_SEC_STATUS_PAIRING_NOT_SUPP
+    enc_key_size            = driver.BLE_GAP_SEC_STATUS_ENC_KEY_SIZE
+    smp_cmd_unsupported     = driver.BLE_GAP_SEC_STATUS_SMP_CMD_UNSUPPORTED
+    unspecified             = driver.BLE_GAP_SEC_STATUS_UNSPECIFIED
+    repeated_attempts       = driver.BLE_GAP_SEC_STATUS_REPEATED_ATTEMPTS
+    invalid_params          = driver.BLE_GAP_SEC_STATUS_INVALID_PARAMS
+    dhkey_failure           = driver.BLE_GAP_SEC_STATUS_DHKEY_FAILURE
+    num_comp_failure        = driver.BLE_GAP_SEC_STATUS_NUM_COMP_FAILURE
+    br_edr_in_prog          = driver.BLE_GAP_SEC_STATUS_BR_EDR_IN_PROG
+    x_trans_key_disallowed  = driver.BLE_GAP_SEC_STATUS_X_TRANS_KEY_DISALLOWED
 
 #################### Gap ##################
 class BLEGapAdvType(Enum):
